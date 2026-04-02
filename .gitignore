@@ -30,3 +30,8 @@ pnpm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Local reference docs
+docs/ReferenceItem/
+
+
