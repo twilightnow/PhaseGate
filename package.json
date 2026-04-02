@@ -1,0 +1,26 @@
+{
+  "name": "phasegate",
+  "version": "0.1.0",
+  "description": "Engineered AI coding workflow tool",
+  "main": "dist/index.js",
+  "bin": {
+    "phasegate": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "acceptance:phase2": "tsx scripts/acceptance-phase2.ts"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
