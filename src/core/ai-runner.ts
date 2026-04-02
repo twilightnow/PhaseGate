@@ -4,39 +4,81 @@ import * as fse from 'fs-extra';
 import type { WorkerReport } from '../types';
 
 export interface IAiRunner {
-  /** Non-interactive: pass files + prompt, get result back */
   run(files: string[], prompt: string): Promise<string>;
-  /**
-   * Fork Worker mode: launch independent AI CLI subprocess for a single module.
-   * Resolves after worker completes (don't peek principle).
-   */
   fork(files: string[], prompt: string): Promise<WorkerReport>;
-  /** Interactive: open dialog session for requirements discussion */
   chat(systemPrompt: string): Promise<void>;
 }
 
-/**
- * ClaudeRunner: calls the `claude` CLI.
- * Switch implementation via phasegate.config.json `runner` field.
- */
-export class ClaudeRunner implements IAiRunner {
+type RunnerName = 'claude' | 'gemini' | 'codex';
+
+interface RunnerConfig {
+  runner?: string;
+}
+
+interface RunnerDefinition {
+  command: string;
+  buildRunArgs: (prompt: string) => string[];
+  buildChatArgs: (systemPrompt: string) => string[];
+}
+
+const RUNNER_DEFINITIONS: Record<RunnerName, RunnerDefinition> = {
+  claude: {
+    command: 'claude',
+    buildRunArgs: (prompt) => ['-p', prompt],
+    buildChatArgs: (systemPrompt) => (systemPrompt ? ['--system-prompt', systemPrompt] : []),
+  },
+  gemini: {
+    command: 'gemini',
+    buildRunArgs: (prompt) => ['-p', prompt],
+    buildChatArgs: (systemPrompt) => (systemPrompt ? ['-i', systemPrompt] : []),
+  },
+  codex: {
+    command: 'codex',
+    buildRunArgs: (prompt) => ['exec', prompt],
+    buildChatArgs: (systemPrompt) => (systemPrompt ? [systemPrompt] : []),
+  },
+};
+
+const RUNNER_ALIASES: Record<string, RunnerName> = {
+  claude: 'claude',
+  gemini: 'gemini',
+  codex: 'codex',
+  openai: 'codex',
+  chatgpt: 'codex',
+};
+
+export class CliRunner implements IAiRunner {
+  constructor(private readonly definition: RunnerDefinition) {}
+
   async run(files: string[], prompt: string): Promise<string> {
     const fullPrompt = await buildContextPrompt(files, prompt);
-    return spawnClaude(['-p', fullPrompt]);
+    return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt));
   }
 
   async fork(files: string[], prompt: string): Promise<WorkerReport> {
     const fullPrompt = await buildContextPrompt(files, prompt);
-    const output = await spawnClaude(['-p', fullPrompt]);
+    const output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt));
     return parseWorkerReport(output);
   }
 
   async chat(systemPrompt: string): Promise<void> {
-    await spawnClaudeInteractive(systemPrompt);
+    await spawnCliInteractive(
+      this.definition.command,
+      this.definition.buildChatArgs(systemPrompt)
+    );
   }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+export class ClaudeRunner extends CliRunner {
+  constructor() {
+    super(RUNNER_DEFINITIONS.claude);
+  }
+}
+
+export async function createRunner(projectRoot: string = process.cwd()): Promise<IAiRunner> {
+  const runnerName = await loadRunnerName(projectRoot);
+  return new CliRunner(RUNNER_DEFINITIONS[runnerName]);
+}
 
 async function buildContextPrompt(files: string[], prompt: string): Promise<string> {
   const parts: string[] = [];
@@ -46,46 +88,91 @@ async function buildContextPrompt(files: string[], prompt: string): Promise<stri
       parts.push(`--- FILE: ${path.basename(filePath)} ---\n${content}`);
     }
   }
+
   if (parts.length > 0) {
     return parts.join('\n\n') + '\n\n--- TASK ---\n' + prompt;
   }
+
   return prompt;
 }
 
-function spawnClaude(args: string[]): Promise<string> {
+async function loadRunnerName(projectRoot: string): Promise<RunnerName> {
+  const configPaths = [
+    path.join(projectRoot, '.phasegate', 'phasegate.config.json'),
+    path.join(projectRoot, 'phasegate.config.json'),
+  ];
+
+  for (const configPath of configPaths) {
+    if (!(await fse.pathExists(configPath))) continue;
+
+    const config = (await fse.readJson(configPath)) as RunnerConfig;
+    const rawRunner = config.runner?.toLowerCase().trim();
+    if (!rawRunner) continue;
+
+    const resolvedRunner = RUNNER_ALIASES[rawRunner];
+    if (!resolvedRunner) {
+      throw new Error(
+        `Unsupported runner "${config.runner}" in ${configPath}. Supported values: ${Object.keys(RUNNER_DEFINITIONS).join(', ')}`
+      );
+    }
+
+    return resolvedRunner;
+  }
+
+  return 'claude';
+}
+
+function spawnCli(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', args, {
+    const proc = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+      windowsHide: true,
     });
 
     let stdout = '';
     let stderr = '';
 
-    proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
-    proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+    proc.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`claude exited with code ${code}\n${stderr}`));
-      } else {
-        resolve(stdout.trim());
+        reject(new Error(`${command} exited with code ${code}\n${stderr}`));
+        return;
       }
+
+      resolve(stdout.trim());
     });
 
     proc.on('error', (err) => reject(err));
   });
 }
 
-async function spawnClaudeInteractive(systemPrompt: string): Promise<void> {
+function spawnCliInteractive(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = systemPrompt ? ['--system', systemPrompt] : [];
-    const proc = spawn('claude', args, { stdio: 'inherit' });
-    proc.on('close', () => resolve());
+    const proc = spawn(command, args, {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      windowsHide: true,
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${code}`));
+        return;
+      }
+
+      resolve();
+    });
+
     proc.on('error', reject);
   });
 }
-
-// ── WorkerReport parser / formatter ──────────────────────────────────────────
 
 export function parseWorkerReport(output: string): WorkerReport {
   const scope = extractSection(output, 'Scope') || 'unknown module';
@@ -135,6 +222,7 @@ function extractSection(content: string, section: string): string {
 function extractListSection(content: string, section: string): string[] {
   const text = extractSection(content, section);
   if (!text || text === '(none)') return [];
+
   return text
     .split('\n')
     .filter((line) => line.trim().startsWith('- '))

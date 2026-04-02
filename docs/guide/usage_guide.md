@@ -21,7 +21,6 @@
 **安装：**
 
 ```bash
-cd PhaseGate
 npm install
 ```
 
@@ -70,6 +69,7 @@ phasegate --help
 
 ```bash
 npx tsx src/index.ts init /path/to/my-project
+phasegate init
 ```
 
 生成结构：

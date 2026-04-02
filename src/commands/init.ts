@@ -15,18 +15,17 @@ export function createInitCommand(): Command {
   const cmd = new Command('init');
 
   cmd
-    .description('Initialize a new PhaseGate project in the current directory')
-    .argument('[name]', 'project name (defaults to current directory name)')
-    .action(async (nameArg: string | undefined) => {
+    .description('Initialize PhaseGate in the current directory')
+    .action(async () => {
       const cwd = process.cwd();
-      const projectName = nameArg ?? path.basename(cwd);
+      const projectName = path.basename(cwd);
       const pgDir = path.join(cwd, '.phasegate');
       const progressJsonPath = path.join(pgDir, 'progress.json');
 
       if (await fse.pathExists(progressJsonPath)) {
         console.error(
           chalk.red('Error:') +
-          ' .phasegate/progress.json already exists. This directory may already be a PhaseGate project.'
+            ' .phasegate/progress.json already exists. This directory may already be a PhaseGate project.'
         );
         process.exit(1);
       }
@@ -35,12 +34,11 @@ export function createInitCommand(): Command {
       await fse.ensureDir(path.join(pgDir, 'design'));
       await fse.ensureDir(path.join(pgDir, 'contracts'));
 
-      // Seed requirements directory with a template file
       const requirementsTemplate = [
         '# {feature-name}',
         '',
         '## Description',
-        '{一段话描述}',
+        'Briefly describe the feature and its purpose.',
         '',
         '## Scope',
         'IN: ...',
@@ -90,16 +88,21 @@ export function createInitCommand(): Command {
         { spaces: 2 }
       );
 
-      console.log(chalk.green('✓') + ` PhaseGate project "${projectName}" initialized\n`);
-      console.log(`  ${chalk.cyan('.phasegate/requirements/')}  requirements documents (template included)`);
-      console.log(`  ${chalk.cyan('.phasegate/design/')}        module design documents (auto-generated in Phase 1)`);
-      console.log(`  ${chalk.cyan('.phasegate/contracts/')}     interface contracts (auto-generated in Phase 1)`);
+      console.log(chalk.green('✓') + ` PhaseGate initialized for "${projectName}"\n`);
+      console.log(
+        `  ${chalk.cyan('.phasegate/requirements/')}  requirements documents (template included)`
+      );
+      console.log(
+        `  ${chalk.cyan('.phasegate/design/')}        module design documents (generated in Phase 1)`
+      );
+      console.log(
+        `  ${chalk.cyan('.phasegate/contracts/')}     interface contracts (generated in Phase 1)`
+      );
       console.log(`  ${chalk.cyan('.phasegate/progress.json')}  project state (source of truth)`);
       console.log(`  ${chalk.cyan('.phasegate/progress.md')}    project progress (human-readable)`);
       console.log(`  ${chalk.cyan('.phasegate/phasegate.config.json')}  configuration\n`);
-      console.log(`Next step: ${chalk.bold('phasegate chat')} — start requirements discussion`);
+      console.log(`Next step: ${chalk.bold('phasegate chat')} to start requirements discussion`);
     });
 
   return cmd;
 }
-

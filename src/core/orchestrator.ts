@@ -3,7 +3,8 @@ import * as fse from 'fs-extra';
 import type { WorkerReport, ModuleRunStatus } from '../types';
 import { ProgressManager } from './progress-manager';
 import { DependencyGraph, type ModuleNode } from './dependency-graph';
-import { ClaudeRunner } from './ai-runner';
+import type { IAiRunner } from './ai-runner';
+import { createRunner } from './ai-runner';
 
 export interface ModuleRunResult {
   moduleName: string;
@@ -37,9 +38,9 @@ const ARCH_CONSTRAINTS_REL = path.join('docs', '03_architecture_constraints.md')
 export class Orchestrator implements IOrchestrator {
   private pm = new ProgressManager();
   private dg = new DependencyGraph();
-  private runner = new ClaudeRunner();
 
   async run(projectRoot: string): Promise<ModuleRunResult[]> {
+    const runner = await createRunner(projectRoot);
     const progress = this.pm.read(projectRoot);
 
     // Build full DAG
@@ -68,7 +69,7 @@ export class Orchestrator implements IOrchestrator {
     for (const wave of waves) {
       // Fork all modules in this wave concurrently (Don't peek / Don't race)
       const waveResults = await Promise.all(
-        wave.map((node) => this._runModule(projectRoot, node, failedModules))
+        wave.map((node) => this._runModule(projectRoot, node, failedModules, undefined, runner))
       );
 
       for (const result of waveResults) {
@@ -95,6 +96,7 @@ export class Orchestrator implements IOrchestrator {
     moduleName: string,
     failureContext: string
   ): Promise<ModuleRunResult> {
+    const runner = await createRunner(projectRoot);
     const allNodes = await this.dg.build(projectRoot);
     const node = allNodes.find((n) => n.name === moduleName);
 
@@ -110,7 +112,7 @@ export class Orchestrator implements IOrchestrator {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       const prompt = buildRetryPrompt(moduleName, node, failureContext, attempt);
       const failedModules = new Set<string>();
-      const result = await this._runModule(projectRoot, node, failedModules, prompt);
+      const result = await this._runModule(projectRoot, node, failedModules, prompt, runner);
 
       if (result.status === 'done') {
         this.pm.markModuleDone(projectRoot, moduleName);
@@ -129,7 +131,8 @@ export class Orchestrator implements IOrchestrator {
     projectRoot: string,
     node: ModuleNode,
     failedModules: Set<string>,
-    overridePrompt?: string
+    overridePrompt?: string,
+    runner?: IAiRunner
   ): Promise<ModuleRunResult> {
     // Block if any dependency failed
     const blockedBy = node.dependencies.find((dep) => failedModules.has(dep));
@@ -157,7 +160,8 @@ export class Orchestrator implements IOrchestrator {
     const startMs = Date.now();
 
     try {
-      const report = await this.runner.fork(contextFiles, prompt);
+      const activeRunner = runner ?? (await createRunner(projectRoot));
+      const report = await activeRunner.fork(contextFiles, prompt);
       const durationMs = Date.now() - startMs;
 
       // Persist report to scratchpad (don't peek was satisfied — process done)

@@ -13,3 +13,9 @@
 
 ## 延后
 - design/和contracts/ 提供一个初期的全局整理。 
+- 使用指导需要更新 按 本地部署和phasegate命令
+Description的模板不太对
+Claude 文件夹信任问题
+AI CLI PATH问题
+
+启动了 但是没有读入requirements.md内容
