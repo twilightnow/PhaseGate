@@ -2,73 +2,55 @@
 
 ---
 
-## 快速上手路径
+## 快速流程
 
 ```
-安装依赖 → 健康检查 → init 新项目 → 填写文档 → status/progress 查看状态 → chat/review/run
+安装 → 健康检查 → init → chat（需求确认）→ run（Phase 1-5）
 ```
 
 ---
 
-## 1. 环境准备
+## 1. 安装与环境
 
 **依赖：**
 
 - Node.js 18+
 - npm
-- （可选）`claude` CLI — `chat` / `review` / `run` 命令需要
-
-**安装：**
+- `claude` CLI（`chat` / `run` 命令必须）
 
 ```bash
 npm install
 ```
 
-**健康检查（推荐先跑一次）：**
+**健康检查（建议先跑一次）：**
 
 ```bash
 npx tsc --noEmit
 npm run acceptance:phase2
 ```
 
-两条都通过，说明 CLI 和依赖图功能可用。
+两条都通过，说明 CLI 和依赖图功能正常。
 
 ---
 
 ## 2. 启动方式
 
-开发阶段推荐直接跑源码：
+| 场景 | 命令前缀 |
+|---|---|
+| 开发 / 排查（推荐） | `npx tsx src/index.ts <command>` |
+| 构建产物后 | `npm run build && node dist/index.js <command>` |
+| 全局安装后 | `npm link` 后使用 `phasegate <command>` |
 
-```bash
-npx tsx src/index.ts --help
-```
-
-构建产物后也可以：
-
-```bash
-npm run build
-node dist/index.js --help
-```
-
-全局安装方式：
-
-```bash
-npm link
-phasegate --help
-```
-
-> 排查问题优先用 `npx tsx src/index.ts`，报错信息更直接。
+> 报错时优先用 `npx tsx src/index.ts`，错误信息更直接。
 
 ---
 
-## 3. 最小使用流程
+## 3. 初始化项目
 
-### 3.1 初始化项目
-
-**在 PhaseGate 目录下**，对一个目标目录执行初始化：
+**先 cd 进目标目录**，再执行：
 
 ```bash
-npx tsx src/index.ts init /path/to/my-project
+cd /path/to/my-project
 phasegate init
 ```
 
@@ -76,130 +58,101 @@ phasegate init
 
 ```
 my-project/
-├── requirements/
-├── design/
-├── contracts/
-├── progress.json
-├── progress.md
-└── phasegate.config.json
+└── .phasegate/
+    ├── requirements/
+    │   └── requirements.md    ← 需求草稿模板（可选填写）
+    ├── design/
+    ├── contracts/
+    ├── progress.json
+    ├── progress.md
+    └── phasegate.config.json
 ```
 
-### 3.2 进入项目目录，查看状态
+---
+
+## 4. Phase 0：需求确认
+
+### 流程
+
+```
+（可选）填写 .phasegate/requirements/requirements.md 草稿
+    ↓
+phasegate chat [--feature <name>]
+    ↓ Claude 读取 prompts/phase0_requirements.md 获得指令
+    ↓ 扫描已有需求文件 → 讨论 → 生成 requirements/{name}.md
+    ↓ 用户手动退出 Claude 会话（Ctrl+C / exit）
+    ↓ PhaseGate 自动运行 Gate 检查
+    ↓ Gate 通过 → currentPhase 更新为 1
+```
+
+### 命令
 
 ```bash
-cd /path/to/my-project
-npx tsx /path/to/PhaseGate/src/index.ts status
-npx tsx /path/to/PhaseGate/src/index.ts progress
+phasegate chat                    # 通用需求讨论
+phasegate chat --feature login    # 指定特性名
 ```
 
-> 如果已全局安装，直接用 `phasegate status` 即可。
+### Phase 0 Gate 检查条件
+
+退出 Claude 会话后，PhaseGate 自动验证：
+
+- `.phasegate/requirements/` 下存在至少一个非模板 `.md` 文件
+- 每个需求文件包含 `## Description`、`## Scope`、`## Acceptance Criteria`
+
+Gate 失败时会列出具体问题，重新执行 `phasegate chat` 修复后再退出。
+
+### 需求草稿（可选）
+
+`init` 生成的 `requirements/requirements.md` 是空白模板。可以在启动 `chat` 前手工填写想法或已知约束，Claude 进入会话后会先读取这些内容，基于已有内容继续讨论而不是从零开始。
 
 ---
 
-## 4. 填写项目文档
+## 5. Phase 1-5：驱动各阶段
 
-### `requirements/`
-
-放需求文档，对应 Phase 0 讨论产出。文件名任意。
-
-```
-requirements/login.md
-requirements/user-profile.md
-```
-
-### `design/`
-
-每个模块一个 Markdown 文件，**文件名即模块名**。
-
-依赖关系写在 `## Dependencies` 表格中：
-
-```markdown
-# module-b
-
-## Dependencies
-| Dependency | Why |
-|---|---|
-| module-a | needs A |
-```
-
-依赖图会从这里读取模块间关系，计算执行波次。
-
-### `contracts/`
-
-接口契约文档，frontmatter 中的 `consumers` 字段决定哪些模块会注入该契约。
-
-```markdown
----
-name: IFoo
-description: Foo interface
-consumers:
-  - module-b
----
-
-# IFoo contract
-```
-
----
-
-## 5. 依赖图
-
-`DependencyGraph` 会做两件事：
-
-1. 扫描 `design/`，提取模块依赖，计算执行波次
-2. 扫描 `contracts/`，按 `consumers` 将契约注入对应模块
-
-**示例：**
-
-| 模块 | 依赖 |
-|---|---|
-| module-a | 无 |
-| module-b | module-a |
-
-执行波次：Wave 0 → `module-a`，Wave 1 → `module-b`
-
-**循环依赖**（如 `module-b ↔ module-c`）会直接抛出 `Circular dependency` 错误，需修改模块划分，不可绕过。
-
----
-
-## 6. AI 命令
-
-这三个命令依赖本机 `claude` CLI，未安装时无法执行 AI 流程。
-
-### `chat` — 需求讨论
+Phase 0 Gate 通过后，后续所有阶段统一使用：
 
 ```bash
-npx tsx src/index.ts chat
+phasegate run              # 自动读取 currentPhase 驱动
+phasegate run --phase 2    # 手动指定阶段（调试用）
 ```
 
-前提：当前目录已 `init`，且 `claude` 可用。
+| Phase | 内容 | 模式 |
+|---|---|---|
+| 1 | 设计书生成 | 非交互，AI 自动产出 |
+| 2 | 设计 review | 非交互，AI 输出 PASS/FAIL |
+| 3 | 并行模块开发 | Orchestrator 编排，多 worker 并发 |
+| 4 | 代码 review | 非交互，AI 输出 PASS/FAIL |
+| 5 | 验收 | AI 自动验证 + 人工验收指导书 |
 
-### `review` — 单模块设计 review
-
-```bash
-npx tsx src/index.ts review module-a
-```
-
-前提：`design/module-a.md` 存在，且 `claude` 可用。
-
-### `run` — 驱动当前阶段
-
-```bash
-npx tsx src/index.ts run
-npx tsx src/index.ts run --phase 3
-```
-
-> **注意：** `ConstraintChecker` 当前为桩实现，Phase 3 Orchestrator 骨架尚未完整验证。建议先在开发环境验证，不要直接用于生产流程。
+> `phasegate run` 在 Phase 0 时会提示使用 `phasegate chat`，不会直接执行。
 
 ---
 
-## 7. 推荐试用顺序
+## 6. 辅助命令
 
-1. `npm install` + 健康检查
-2. `init` 建项目骨架
-3. 手工填 `requirements/`、`design/`、`contracts/`
-4. `status` / `progress` 确认状态文件正常
-5. `npm run acceptance:phase2` 验证 CLI 和依赖图
-6. 再试 `chat`、`review`、`run`
+```bash
+phasegate status           # 查看当前阶段状态
+phasegate progress         # 查看完整进度（输出 progress.md）
+phasegate review <module>  # 单模块设计 review（需 claude）
+```
+
+`progress.json` 是状态的 source of truth，`progress.md` 是人类可读视图，两者保持同步。
+
+---
+
+## 7. 配置
+
+`.phasegate/phasegate.config.json`：
+
+```json
+{
+  "maxLinesPerFile": 500,
+  "minTestCoverage": 80,
+  "runner": "claude"
+}
+```
+
+`runner` 支持 `claude`（默认）、`gemini`、`codex`（别名：`openai`、`chatgpt`）。
 
 ---
 
@@ -207,32 +160,39 @@ npx tsx src/index.ts run --phase 3
 
 **`progress.json not found. Run phasegate init first.`**
 
-当前目录不是 PhaseGate 项目目录，先执行 `init`。
+当前目录不是 PhaseGate 项目目录，先执行 `phasegate init`。
+
+**`Gate failed: No requirements file found`**
+
+退出 Claude 会话后 Gate 检查失败，说明 AI 没有生成需求文件。重新执行 `phasegate chat`，在会话结束前确认 AI 已写入 `.phasegate/requirements/{name}.md`。
+
+**`Prompt file not found: .../prompts/phase1_design.md`**
+
+PhaseGate 安装目录下的 `prompts/` 文件夹缺失，通常是 `npm run build` 后 `dist/` 没有对应文件。重新 build 或检查 `package.json` 的 `files` 字段是否包含 `prompts`。
 
 **`claude exited with code ...`**
 
-CLI 本身无问题，但外部 `claude` 命令不可用。检查：
-
+外部 `claude` 命令不可用，检查：
 - `claude` 是否已安装
 - `claude` 是否在 `PATH` 中
-- 当前 shell 能否直接执行 `claude`
 
 **`Circular dependency: ...`**
 
-`design/` 中存在循环依赖，需修改模块划分或依赖关系。
+`.phasegate/design/` 中存在循环依赖，需修改模块划分或依赖关系。
 
 ---
 
 ## 9. 命令速查
 
 ```bash
-npx tsc --noEmit                        # 类型检查
-npm run acceptance:phase2               # 验收测试
-npx tsx src/index.ts --help             # 帮助
-npx tsx src/index.ts init <project>     # 初始化项目
-npx tsx src/index.ts status             # 查看阶段状态
-npx tsx src/index.ts progress           # 查看完整进度
-npx tsx src/index.ts chat               # 需求讨论（需 claude）
-npx tsx src/index.ts review <module>    # 模块 review（需 claude）
-npx tsx src/index.ts run [--phase N]    # 驱动阶段（需 claude）
+npx tsc --noEmit                      # 类型检查
+npm run acceptance:phase2             # 验收测试
+phasegate init                        # 初始化项目
+phasegate chat [--feature <name>]     # 需求确认（Phase 0，需 claude）
+phasegate run [--phase N]             # 驱动阶段 Phase 1-5（需 claude）
+phasegate status                      # 当前阶段状态
+phasegate progress                    # 完整进度
+phasegate review <module>             # 单模块设计 review（需 claude）
 ```
+
+开发模式下将 `phasegate` 替换为 `npx tsx src/index.ts`。

@@ -1,5 +1,0 @@
-{
-  "maxLinesPerFile": 500,
-  "minTestCoverage": 80,
-  "runner": "claude"
-}

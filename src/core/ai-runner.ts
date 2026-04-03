@@ -25,7 +25,7 @@ const RUNNER_DEFINITIONS: Record<RunnerName, RunnerDefinition> = {
   claude: {
     command: 'claude',
     buildRunArgs: (prompt) => ['-p', prompt],
-    buildChatArgs: (systemPrompt) => (systemPrompt ? ['--system-prompt', systemPrompt] : []),
+    buildChatArgs: (systemPrompt) => (systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
   },
   gemini: {
     command: 'gemini',

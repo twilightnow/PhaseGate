@@ -3,18 +3,10 @@ import chalk from 'chalk';
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createRunner } from '../core/ai-runner';
+import { ProgressManager } from '../core/progress-manager';
+import { checkPhase0Gate } from '../core/phase-gate';
 
-const REQUIREMENTS_SYSTEM_PROMPT = `You are assisting with requirements discussion for a PhaseGate project.
-
-Work through the following framework in order. Do not skip unanswered items:
-1. Functional boundary - What does this feature do? What is explicitly out of scope?
-2. Data - What data is involved? What are the relationships?
-3. Error cases - What happens on failure? What are the edge cases?
-4. Acceptance - What counts as "done"? Who validates?
-5. Constraints - Tech stack, performance requirements, other limits?
-
-After all items are confirmed, summarize the requirements and offer to generate
-.phasegate/requirements/{feature-name}.md using the standard template.`;
+const PROMPT_FILE = path.join(__dirname, '..', '..', 'prompts', 'phase0_requirements.md');
 
 export function createChatCommand(): Command {
   const cmd = new Command('chat');
@@ -36,12 +28,19 @@ export function createChatCommand(): Command {
         process.exit(1);
       }
 
-      const systemPrompt = options.feature
-        ? `${REQUIREMENTS_SYSTEM_PROMPT}\n\nFeature being discussed: ${options.feature}`
-        : REQUIREMENTS_SYSTEM_PROMPT;
+      let promptContent = '';
+      if (await fse.pathExists(PROMPT_FILE)) {
+        promptContent = await fse.readFile(PROMPT_FILE, 'utf-8');
+      }
+
+      let systemPrompt = promptContent || `You are facilitating a PhaseGate requirements discussion session.`;
+
+      if (options.feature) {
+        systemPrompt += `\n\nFeature being discussed: ${options.feature}`;
+      }
 
       console.log(chalk.cyan('->') + ' Starting requirements discussion session...');
-      console.log(chalk.dim('(Press Ctrl+C to exit)'));
+      console.log(chalk.dim('(Exit the session when requirements are confirmed)'));
       console.log('');
 
       try {
@@ -54,6 +53,29 @@ export function createChatCommand(): Command {
         );
         process.exit(1);
       }
+
+      // Subprocess exited — Gate check runs automatically
+      console.log('');
+      console.log(chalk.cyan('->') + ' Session ended. Running Phase 0 Gate check...');
+
+      const gate = await checkPhase0Gate(cwd);
+
+      if (!gate.passed) {
+        console.error(chalk.red('Gate failed:'));
+        for (const issue of gate.issues) {
+          console.error(`  ${chalk.yellow('!')} ${issue}`);
+        }
+        console.log('');
+        console.log('Fix the issues above and run ' + chalk.bold('phasegate chat') + ' again.');
+        process.exit(1);
+      }
+
+      const pm = new ProgressManager();
+      pm.updatePhase(cwd, 1);
+
+      console.log(chalk.green('✓') + ' Gate passed.');
+      console.log(chalk.green('✓') + ' Phase advanced to 1 (Design Generation).');
+      console.log('Run ' + chalk.bold('phasegate run') + ' to start Phase 1.');
     });
 
   return cmd;

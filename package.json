@@ -6,6 +6,10 @@
   "bin": {
     "phasegate": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "prompts"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",

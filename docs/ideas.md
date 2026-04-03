@@ -10,12 +10,20 @@
 
 // .phasegate/ 不天然加入 .gitignore，设计书（design/、contracts/）有长期保存价值，应纳入版本管理
 
+## 需讨论
+- 启动了 但是没有读入requirements.md内容
+- init怎么判断的主目录的第一级创建目录的
+- `progress.md` 由每次 `ProgressManager.write()` 自动重新生成 Status Section，Phase Summary 区块（由 AI 阶段追加）则只增不改。似乎有维护性问题
+
 
 ## 延后
-- design/和contracts/ 提供一个初期的全局整理。 
-- 使用指导需要更新 按 本地部署和phasegate命令
-Description的模板不太对
-Claude 文件夹信任问题
-AI CLI PATH问题
 
-启动了 但是没有读入requirements.md内容
+- design/和contracts/ 提供一个初期的全局整理。  每个文件里面都应该加简单的解释词
+
+- 使用指导需要更新 按 本地部署和phasegate命令
+- Description的模板不太对
+- Claude 文件夹信任问题
+- AI CLI PATH问题
+- 默认配置需要增加对于各个模型的调度方案
+- 但是没有读入requirements，需要增加一个对应指摘的文件
+- 系统提示词多语言支持

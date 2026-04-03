@@ -1,42 +1,23 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import * as path from 'path';
+import * as fse from 'fs-extra';
 import { ProgressManager } from '../core/progress-manager';
 import { Orchestrator, type ModuleRunResult } from '../core/orchestrator';
 import { createRunner } from '../core/ai-runner';
 import { ConstraintChecker } from '../core/constraint-checker';
 import type { ProjectProgress, PhaseId } from '../types';
 
-const PHASE_PROMPTS: Record<number, { title: string; prompt: string }> = {
-  0: {
-    title: 'Requirements Discussion',
-    prompt:
-      'Follow PHASE_0 steps from docs/01_workflow_phases.md. ' +
-      'Ask requirements questions in order. Output .phasegate/requirements/{name}.md when done.',
-  },
-  1: {
-    title: 'Design Generation',
-    prompt:
-      'Follow PHASE_1 steps from docs/01_workflow_phases.md. ' +
-      'Generate .phasegate/design/{module}.md for all modules and .phasegate/contracts/{interface}.md for all interfaces.',
-  },
-  2: {
-    title: 'Design Review',
-    prompt:
-      'Follow PHASE_2 steps from docs/01_workflow_phases.md. ' +
-      'Review all design documents. Output PASS/FAIL with issue list.',
-  },
-  4: {
-    title: 'Code Review',
-    prompt:
-      'Follow PHASE_4 steps from docs/01_workflow_phases.md. ' +
-      'Review all code changes. Output PASS/FAIL with issue list.',
-  },
-  5: {
-    title: 'Acceptance',
-    prompt:
-      'Follow PHASE_5 steps from docs/01_workflow_phases.md. ' +
-      'Run acceptance verification and output results.',
-  },
+const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
+
+// Phase 0 → phasegate chat
+// Phase 3 → Orchestrator (special path)
+// Phases 1, 2, 4, 5 → runSinglePhase
+const PHASE_META: Record<number, { title: string; promptFile: string }> = {
+  1: { title: 'Design Generation',  promptFile: 'phase1_design.md' },
+  2: { title: 'Design Review',      promptFile: 'phase2_review.md' },
+  4: { title: 'Code Review',        promptFile: 'phase4_code_review.md' },
+  5: { title: 'Acceptance',         promptFile: 'phase5_acceptance.md' },
 };
 
 export function createRunCommand(): Command {
@@ -63,6 +44,16 @@ export function createRunCommand(): Command {
       }
 
       const phase = options.phase ?? progress.currentPhase;
+
+      if (phase === 0) {
+        console.log(
+          chalk.yellow('!') +
+            ' Phase 0 is an interactive session. Run ' +
+            chalk.bold('phasegate chat') +
+            ' instead.'
+        );
+        process.exit(0);
+      }
 
       if (phase === 3) {
         await runPhase3(cwd, pm, progress);
@@ -119,7 +110,7 @@ async function runPhase3(
 }
 
 async function runSinglePhase(cwd: string, phase: PhaseId): Promise<void> {
-  const meta = PHASE_PROMPTS[phase];
+  const meta = PHASE_META[phase];
   if (!meta) {
     console.error(chalk.red(`Error: No runner configured for phase ${phase}.`));
     process.exit(1);
@@ -127,17 +118,25 @@ async function runSinglePhase(cwd: string, phase: PhaseId): Promise<void> {
 
   console.log(chalk.cyan('->') + ` Running Phase ${phase}: ${meta.title}...`);
 
+  const promptPath = path.join(PROMPTS_DIR, meta.promptFile);
+  let prompt: string;
+
+  try {
+    prompt = await fse.readFile(promptPath, 'utf-8');
+  } catch {
+    console.error(
+      chalk.red('Error:') + ` Prompt file not found: ${promptPath}`
+    );
+    process.exit(1);
+  }
+
   try {
     const runner = await createRunner(cwd);
-    if (phase === 0) {
-      await runner.chat(meta.prompt);
-    } else {
-      const result = await runner.run(
-        ['.phasegate/progress.md', 'docs/01_workflow_phases.md'],
-        meta.prompt
-      );
-      console.log(result);
-    }
+    const result = await runner.run(
+      ['.phasegate/progress.md', 'docs/03_architecture_constraints.md'],
+      prompt
+    );
+    console.log(result);
   } catch (err) {
     console.error(
       chalk.red('Runner error:'),
