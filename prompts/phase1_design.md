@@ -21,7 +21,7 @@ Before generating anything, read the following:
 ## Steps
 
 1. Parse all requirements files. Identify the distinct modules needed.
-2. For each module, create `.phasegate/design/{module-name}.md` using the Module Design Book Template below.
+2. For each module, create `.phasegate/tasks/{module-name}.md` using the Module Design Book Template below.
 3. Identify every cross-module interface. For each, create `.phasegate/contracts/{InterfaceName}.md` using the Contract Template below.
 4. Append a Phase 1 Summary block to `.phasegate/progress.md`.
 
@@ -103,14 +103,14 @@ Append this block to `.phasegate/progress.md`:
 ## Phase 1 Summary
 
 ### Current State
-Generated design books: .phasegate/design/module-a.md, ...
+Generated design books: .phasegate/tasks/module-a.md, ...
 Generated contracts: .phasegate/contracts/IFoo.md, ...
 
 ### Key Decisions
 - {key design decisions made}
 
 ### Outputs
-- .phasegate/design/: {N} module design books
+- .phasegate/tasks/: {N} module design books
 - .phasegate/contracts/: {N} interface contracts
 
 ### Notes for Phase 2
@@ -121,7 +121,7 @@ Generated contracts: .phasegate/contracts/IFoo.md, ...
 
 ## Gate Conditions (verify before finishing)
 
-- [ ] Every identified module has a `.phasegate/design/{module-name}.md`
+- [ ] Every identified module has a `.phasegate/tasks/{module-name}.md`
 - [ ] Every cross-module interface has a `.phasegate/contracts/{InterfaceName}.md` with frontmatter
 - [ ] The `consumers` field in each contract frontmatter is filled
 - [ ] Phase 1 Summary has been appended to `.phasegate/progress.md`

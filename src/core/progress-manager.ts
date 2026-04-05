@@ -10,14 +10,114 @@ const SUMMARY_SECTION_START = '<!-- ==================== Phase Summary =========
 const SUMMARY_SECTION_NOTE =
   '<!-- Append phase summaries below. Existing summaries should not be edited. -->';
 
-const PHASE_NAMES: Record<PhaseId, string> = {
-  0: 'Requirements Discussion',
-  1: 'Design Generation',
-  2: 'Design Review',
-  3: 'Parallel Module Development',
-  4: 'Code Review',
-  5: 'Acceptance',
+type L10n = {
+  phaseNames: Record<PhaseId, string>;
+  title: string;
+  notice: string;
+  lastUpdated: string;
+  currentPhase: string;
+  requirements: string;
+  design: string;
+  modules: string;
+  contracts: string;
+  designReviewPassed: string;
+  moduleDevelopment: string;
+  codeReview: string;
+  codeReviewPassed: string;
+  blockers: string;
+  notStarted: string;
+  filledAfterPhase1: string;
+  none: string;
+  phaseSummaryHeading: (phase: PhaseId) => string;
 };
+
+const L10N: Record<string, L10n> = {
+  zh: {
+    phaseNames: {
+      0: '需求讨论',
+      1: '设计生成',
+      2: '设计评审',
+      3: '并行模块开发',
+      4: '代码评审',
+      5: '验收',
+    },
+    title: '项目进度',
+    notice: '本文件由 PhaseGate 维护，请勿手动编辑状态区段。',
+    lastUpdated: '最后更新',
+    currentPhase: '## 当前阶段',
+    requirements: '## 需求',
+    design: '## 设计',
+    modules: '### 模块',
+    contracts: '### 接口契约',
+    designReviewPassed: '设计评审通过',
+    moduleDevelopment: '## 模块开发',
+    codeReview: '## 代码评审',
+    codeReviewPassed: '代码评审通过',
+    blockers: '## 阻塞项',
+    notStarted: '（未开始）',
+    filledAfterPhase1: '（Phase 1 后填充）',
+    none: '无',
+    phaseSummaryHeading: (phase) => `## 阶段 ${phase} 摘要`,
+  },
+  ja: {
+    phaseNames: {
+      0: '要件定義',
+      1: 'デザイン生成',
+      2: 'デザインレビュー',
+      3: '並行モジュール開発',
+      4: 'コードレビュー',
+      5: '受入',
+    },
+    title: 'プロジェクト進捗',
+    notice: 'このファイルは PhaseGate によって管理されています。ステータスセクションを手動編集しないでください。',
+    lastUpdated: '最終更新',
+    currentPhase: '## 現在のフェーズ',
+    requirements: '## 要件',
+    design: '## 設計',
+    modules: '### モジュール',
+    contracts: '### インターフェース契約',
+    designReviewPassed: 'デザインレビュー通過',
+    moduleDevelopment: '## モジュール開発',
+    codeReview: '## コードレビュー',
+    codeReviewPassed: 'コードレビュー通過',
+    blockers: '## ブロッカー',
+    notStarted: '（未着手）',
+    filledAfterPhase1: '（Phase 1 後に記入）',
+    none: 'なし',
+    phaseSummaryHeading: (phase) => `## フェーズ ${phase} サマリー`,
+  },
+  en: {
+    phaseNames: {
+      0: 'Requirements Discussion',
+      1: 'Design Generation',
+      2: 'Design Review',
+      3: 'Parallel Module Development',
+      4: 'Code Review',
+      5: 'Acceptance',
+    },
+    title: 'Project Progress',
+    notice: 'This file is maintained by PhaseGate. Do not manually edit the status section.',
+    lastUpdated: 'Last updated',
+    currentPhase: '## Current Phase',
+    requirements: '## Requirements',
+    design: '## Design',
+    modules: '### Modules',
+    contracts: '### Contracts',
+    designReviewPassed: 'Design review passed',
+    moduleDevelopment: '## Module Development',
+    codeReview: '## Code Review',
+    codeReviewPassed: 'Code review passed',
+    blockers: '## Blockers',
+    notStarted: '(not started)',
+    filledAfterPhase1: '(filled after Phase 1)',
+    none: 'None',
+    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
+  },
+};
+
+function getL10n(locale?: string): L10n {
+  return L10N[locale ?? 'zh'] ?? L10N['zh'];
+}
 
 export interface IProgressManager {
   read(cwd: string): ProjectProgress;
@@ -92,7 +192,9 @@ export class ProgressManager implements IProgressManager {
       throw new Error(`progress.md not found in ${cwd}`);
     }
     const existing = fse.readFileSync(mdPath, 'utf-8');
-    const block = `\n## Phase ${phase} Summary\n\n${summary}\n`;
+    const progress = this.read(cwd);
+    const l = getL10n(progress.locale);
+    const block = `\n${l.phaseSummaryHeading(phase)}\n\n${summary}\n`;
     fse.writeFileSync(mdPath, existing + block, 'utf-8');
   }
 
@@ -115,30 +217,31 @@ export class ProgressManager implements IProgressManager {
   }
 
   private _buildStatusSection(progress: ProjectProgress): string {
+    const l = getL10n(progress.locale);
     const lines: string[] = [];
-    const phaseName = PHASE_NAMES[progress.currentPhase];
+    const phaseName = l.phaseNames[progress.currentPhase];
     const today = new Date().toISOString().split('T')[0];
 
-    lines.push(`# ${progress.projectName} Project Progress`);
+    lines.push(`# ${progress.projectName} ${l.title}`);
     lines.push('');
-    lines.push('> This file is maintained by PhaseGate. Do not manually edit the status section.');
+    lines.push(`> ${l.notice}`);
     lines.push('');
-    lines.push(`Last updated: ${today}`);
+    lines.push(`${l.lastUpdated}: ${today}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push('## Current Phase');
+    lines.push(l.currentPhase);
     lines.push('');
     lines.push(`Phase ${progress.currentPhase}: ${phaseName}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push('## Requirements');
+    lines.push(l.requirements);
     lines.push('');
     if (progress.requirements.length === 0) {
-      lines.push('(not started)');
+      lines.push(l.notStarted);
     } else {
       for (const req of progress.requirements) {
         const tick = req.status === 'done' ? 'x' : ' ';
@@ -149,13 +252,13 @@ export class ProgressManager implements IProgressManager {
     lines.push('---');
     lines.push('');
 
-    lines.push('## Design');
+    lines.push(l.design);
     lines.push('');
     if (progress.design.modules.length === 0) {
-      lines.push('(filled after Phase 1)');
+      lines.push(l.filledAfterPhase1);
       lines.push('');
     } else {
-      lines.push('### Modules');
+      lines.push(l.modules);
       lines.push('');
       for (const mod of progress.design.modules) {
         const tick = mod.status === 'done' ? 'x' : ' ';
@@ -164,7 +267,7 @@ export class ProgressManager implements IProgressManager {
       lines.push('');
     }
     if (progress.design.contracts.length > 0) {
-      lines.push('### Contracts');
+      lines.push(l.contracts);
       lines.push('');
       lines.push('| Contract | Status | Provider | Consumers |');
       lines.push('|---|---|---|---|');
@@ -176,15 +279,15 @@ export class ProgressManager implements IProgressManager {
       lines.push('');
     }
     const reviewTick = progress.design.reviewPassed ? 'x' : ' ';
-    lines.push(`- [${reviewTick}] Design review passed`);
+    lines.push(`- [${reviewTick}] ${l.designReviewPassed}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push('## Module Development');
+    lines.push(l.moduleDevelopment);
     lines.push('');
     if (progress.modules.length === 0) {
-      lines.push('(filled after Phase 1)');
+      lines.push(l.filledAfterPhase1);
     } else {
       for (const mod of progress.modules) {
         const tick = mod.status === 'done' ? 'x' : ' ';
@@ -202,18 +305,18 @@ export class ProgressManager implements IProgressManager {
     lines.push('---');
     lines.push('');
 
-    lines.push('## Code Review');
+    lines.push(l.codeReview);
     lines.push('');
     const codeReviewTick = progress.codeReviewPassed ? 'x' : ' ';
-    lines.push(`- [${codeReviewTick}] Code review passed`);
+    lines.push(`- [${codeReviewTick}] ${l.codeReviewPassed}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push('## Blockers');
+    lines.push(l.blockers);
     lines.push('');
     if (progress.blockers.length === 0) {
-      lines.push('None');
+      lines.push(l.none);
     } else {
       for (const b of progress.blockers) {
         lines.push(`- ${b}`);

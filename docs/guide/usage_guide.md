@@ -22,6 +22,27 @@
 npm install
 ```
 
+**Claude Code 权限配置（建议首次使用时配置）：**
+
+PhaseGate 会频繁调用 Bash、读写文件。为避免每次都弹出确认提示，在项目根目录的 `.claude/settings.local.json` 中配置：
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)"
+    ]
+  }
+}
+```
+
+配置后，当前项目内所有工具调用自动允许，无需逐次确认。
+
 **健康检查（建议先跑一次）：**
 
 ```bash
@@ -178,7 +199,7 @@ PhaseGate 安装目录下的 `prompts/` 文件夹缺失，通常是 `npm run bui
 
 **`Circular dependency: ...`**
 
-`.phasegate/design/` 中存在循环依赖，需修改模块划分或依赖关系。
+`.phasegate/tasks/` 中存在循环依赖，需修改模块划分或依赖关系。
 
 ---
 

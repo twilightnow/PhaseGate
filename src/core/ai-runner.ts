@@ -6,7 +6,7 @@ import type { WorkerReport } from '../types';
 export interface IAiRunner {
   run(files: string[], prompt: string): Promise<string>;
   fork(files: string[], prompt: string): Promise<WorkerReport>;
-  chat(systemPrompt: string): Promise<void>;
+  chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void>;
 }
 
 type RunnerName = 'claude' | 'gemini' | 'codex';
@@ -18,14 +18,26 @@ interface RunnerConfig {
 interface RunnerDefinition {
   command: string;
   buildRunArgs: (prompt: string) => string[];
-  buildChatArgs: (systemPrompt: string) => string[];
+  buildChatArgs: (systemPrompt: string, systemPromptFile?: string, initialMessage?: string) => string[];
+  /** When true, the prompt is sent via stdin and buildRunArgs must not include it */
+  useStdinForPrompt?: boolean;
 }
 
 const RUNNER_DEFINITIONS: Record<RunnerName, RunnerDefinition> = {
   claude: {
     command: 'claude',
-    buildRunArgs: (prompt) => ['-p', prompt],
-    buildChatArgs: (systemPrompt) => (systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
+    // Prompt is piped via stdin to avoid multi-line shell-escaping issues on Windows
+    buildRunArgs: () => ['--print'],
+    useStdinForPrompt: true,
+    buildChatArgs: (systemPrompt, systemPromptFile, initialMessage) => {
+      const args: string[] = [];
+      // Prefer file-based flag to avoid multi-line shell-escaping issues on Windows
+      if (systemPromptFile) args.push('--append-system-prompt-file', systemPromptFile);
+      if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
+      // Positional arg — Claude responds to this first, then enters interactive REPL
+      if (initialMessage) args.push(initialMessage);
+      return args;
+    },
   },
   gemini: {
     command: 'gemini',
@@ -52,19 +64,21 @@ export class CliRunner implements IAiRunner {
 
   async run(files: string[], prompt: string): Promise<string> {
     const fullPrompt = await buildContextPrompt(files, prompt);
-    return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt));
+    const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
+    return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
   }
 
   async fork(files: string[], prompt: string): Promise<WorkerReport> {
     const fullPrompt = await buildContextPrompt(files, prompt);
-    const output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt));
+    const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
+    const output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
     return parseWorkerReport(output);
   }
 
-  async chat(systemPrompt: string): Promise<void> {
+  async chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void> {
     await spawnCliInteractive(
       this.definition.command,
-      this.definition.buildChatArgs(systemPrompt)
+      this.definition.buildChatArgs(systemPrompt, systemPromptFile, initialMessage)
     );
   }
 }
@@ -122,13 +136,18 @@ async function loadRunnerName(projectRoot: string): Promise<RunnerName> {
   return 'claude';
 }
 
-function spawnCli(command: string, args: string[]): Promise<string> {
+function spawnCli(command: string, args: string[], stdinContent?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [stdinContent !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
       windowsHide: true,
     });
+
+    if (stdinContent !== undefined && proc.stdin) {
+      proc.stdin.write(stdinContent);
+      proc.stdin.end();
+    }
 
     let stdout = '';
     let stderr = '';

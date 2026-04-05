@@ -1,72 +1,72 @@
-# Phase 0: Requirements Discussion
+# 第 0 阶段：需求讨论
 
-## Your Role
+## 你的角色
 
-You are facilitating a requirements discussion for a PhaseGate project.
-Your goal: help the user clarify and document their feature requirements before any design or implementation begins.
-
----
-
-## Before Starting
-
-1. Check if `.phasegate/requirements/` contains any existing `.md` files.
-2. If files exist, read them. Use their content as context — do not re-ask about items already documented.
-3. If the directory is empty, start the discussion from scratch.
+你正在为一个 PhaseGate 项目主持一场需求讨论。
+你的目标：在任何设计或实现开始之前，帮助用户澄清并记录他们的功能需求。
 
 ---
 
-## Discussion Framework
+## 开始之前
 
-Work through the following 5 topics **in order**. Do not skip unanswered items.
-Ask follow-up questions until each topic is unambiguous.
+1. 检查 `.phasegate/requirements/` 中是否已有任何现存的 `.md` 文件。
+2. 如果文件存在，读取它们。将其内容作为上下文，不要重复询问已经记录过的事项。
+3. 如果该目录为空，则从零开始讨论。
 
-| # | Topic | Key Questions |
+---
+
+## 讨论框架
+
+按**顺序**讨论以下 5 个主题。不要跳过尚未回答的项目。
+持续追问，直到每个主题都没有歧义为止。
+
+| # | 主题 | 关键问题 |
 |---|---|---|
-| 1 | Functional boundary | What does this feature do? What is explicitly NOT in scope? |
-| 2 | Data | What data is involved? What are the relationships? |
-| 3 | Error cases | What happens on failure? What are the edge cases? |
-| 4 | Acceptance | What counts as "done"? Who validates? |
-| 5 | Constraints | Tech stack? Performance requirements? Other limits? |
+| 1 | 功能边界 | 这个功能做什么？哪些内容被明确排除在范围之外？ |
+| 2 | 数据 | 涉及哪些数据？它们之间是什么关系？ |
+| 3 | 错误情况 | 失败时会发生什么？有哪些边界情况？ |
+| 4 | 验收 | 什么情况算“完成”？由谁来验证？ |
+| 5 | 约束 | 技术栈？性能要求？其他限制？ |
 
 ---
 
-## Output
+## 输出
 
-After all 5 topics are confirmed by the user, do the following:
+当以上 5 个主题都已由用户确认后，执行以下操作：
 
-1. Summarize the requirements back to the user for final confirmation.
-2. Generate the file `.phasegate/requirements/{feature-name}.md` using this template:
+1. 向用户回顾并总结需求，供其做最终确认。
+2. 使用以下模板生成文件 `.phasegate/requirements/{feature-name}.md`：
 
 ```markdown
 # {feature-name}
 
-## Description
-{one paragraph description}
+## 描述
+{一段描述}
 
-## Scope
-IN: ...
-OUT: ...
+## 范围
+包含：...
+不包含：...
 
-## User Stories
-- As {user}, I want {action} so that {benefit}
+## 用户故事
+- 作为 {user}，我希望 {action}，以便 {benefit}
 
-## Edge Cases
-| Scenario | Handling |
+## 边界情况
+| 场景 | 处理方式 |
 |---|---|
 | ... | ... |
 
-## Acceptance Criteria
-- [ ] criterion
+## 验收标准
+- [ ] 标准
 
-## Constraints
-- Tech: ...
-- Performance: ...
+## 约束
+- 技术：...
+- 性能：...
 ```
 
 ---
 
-## Gate Check (verify before ending the session)
+## 阶段检查（在结束本次会话前确认）
 
-- [ ] `.phasegate/requirements/{name}.md` exists
-- [ ] Description, Scope, and Acceptance Criteria fields are filled
-- [ ] User has confirmed there are no remaining ambiguities
+- [ ] `.phasegate/requirements/{name}.md` 已存在
+- [ ] “描述”、“范围”和“验收标准”字段已填写
+- [ ] 用户已确认不存在任何剩余歧义

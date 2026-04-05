@@ -97,7 +97,7 @@ OUT: ...
 
 | 文件 | 操作 |
 |---|---|
-| `.phasegate/design/{module-name}.md` | CREATE per module（使用下方模板） |
+| `.phasegate/tasks/{module-name}.md` | CREATE per module（使用下方模板） |
 | `.phasegate/contracts/{interface-name}.md` | CREATE per interface（使用下方模板） |
 | `.phasegate/progress.md` | UPDATE — 填充模块列表 + 接口契约表 |
 
@@ -176,7 +176,7 @@ interface {InterfaceName} {
 
 | 文件 | 操作 |
 |---|---|
-| `.phasegate/design/{module-name}.md` | CREATE per module（使用上方模板） |
+| `.phasegate/tasks/{module-name}.md` | CREATE per module（使用上方模板） |
 | `.phasegate/contracts/{interface-name}.md` | CREATE per interface（使用上方模板，含 frontmatter） |
 | `.phasegate/progress.md` | UPDATE — 填充模块列表 + 接口契约表 + 写入 Phase 1 Summary |
 
@@ -185,14 +185,14 @@ interface {InterfaceName} {
 ## Phase 1 Summary
 
 ### Current State
-已生成模块设计书：.phasegate/design/module-a.md, .phasegate/design/module-b.md, ...
+已生成模块设计书：.phasegate/tasks/module-a.md, .phasegate/tasks/module-b.md, ...
 已生成接口契约：.phasegate/contracts/IFoo.md, .phasegate/contracts/IBar.md, ...
 
 ### Key Decisions
 - {本阶段做出的关键设计决策}
 
 ### Outputs
-- .phasegate/design/：{N} 个模块设计书
+- .phasegate/tasks/：{N} 个模块设计书
 - .phasegate/contracts/：{N} 个接口契约
 
 ### Notes for Phase 2
@@ -200,7 +200,7 @@ interface {InterfaceName} {
 ```
 
 **GATE → PHASE_2:**
-- [ ] 每个识别到的模块都有对应 `.phasegate/design/*.md`
+- [ ] 每个识别到的模块都有对应 `.phasegate/tasks/*.md`
 - [ ] 每个跨模块接口都有对应 `.phasegate/contracts/*.md`（含 frontmatter）
 - [ ] `.phasegate/progress.md` 中模块列表和接口契约表均已填写
 - [ ] Phase 1 Summary 已写入 `.phasegate/progress.md`
@@ -214,7 +214,7 @@ interface {InterfaceName} {
 **LOAD:**
 - `.phasegate/progress.md` 中的 **Phase 1 Summary** 段 [必须] — 作为本阶段 context 锚点，替代重新加载全量需求文件
 - `.phasegate/requirements/{name}.md` [必须]
-- `.phasegate/design/*.md` [必须，全部]
+- `.phasegate/tasks/*.md` [必须，全部]
 - `.phasegate/contracts/*.md` [必须，全部]
 
 **检查清单：**
@@ -228,7 +228,7 @@ interface {InterfaceName} {
 **第二次 review — 独立 AI（空 context）**
 
 **LOAD（只给这些，不给需求文件）:**
-- `.phasegate/design/*.md` [必须]
+- `.phasegate/tasks/*.md` [必须]
 - `.phasegate/contracts/*.md` [必须]
 
 **检查问题：**
@@ -240,7 +240,7 @@ interface {InterfaceName} {
 
 | 文件 | 操作 |
 |---|---|
-| `.phasegate/design/*.md` | UPDATE — 修复 review 发现的问题 |
+| `.phasegate/tasks/*.md` | UPDATE — 修复 review 发现的问题 |
 | `.phasegate/contracts/*.md` | UPDATE — 修复契约定义问题 |
 | `.phasegate/progress.md` | UPDATE — 标记 review 通过 + 写入 Phase 2 Summary |
 
@@ -255,7 +255,7 @@ interface {InterfaceName} {
 - {review 过程中做出的设计调整}
 
 ### Outputs
-- 所有 .phasegate/design/*.md 已定稿
+- 所有 .phasegate/tasks/*.md 已定稿
 - 所有 .phasegate/contracts/*.md 已定稿（状态改为 finalized）
 
 ### Notes for Phase 3
@@ -303,7 +303,7 @@ interface {InterfaceName} {
 每个 worker 是独立启动的 AI CLI 子进程，全新 context，不继承 Coordinator 的任何上下文。Coordinator 在启动时负责计算并注入固定的文件集合。
 
 **LOAD（由 Coordinator 在启动子进程时注入，固定集合）:**
-- `.phasegate/design/{this-module}.md` [必须]
+- `.phasegate/tasks/{this-module}.md` [必须]
 - `.phasegate/contracts/{related-interfaces}.md` [必须] — 通过契约 frontmatter 的 `consumers` 字段过滤，只注入本模块实际依赖的契约
 - `docs/03_architecture_constraints.md` [必须]
 
@@ -374,7 +374,7 @@ Blocked：module-e（下游依赖 module-d 失败）
 
 **LOAD:**
 - `.phasegate/progress.md` 中的 **Phase 3 Summary** 段 [必须] — 确认哪些模块需要 review，哪些 blocked
-- `.phasegate/design/{module}.md` [必须]
+- `.phasegate/tasks/{module}.md` [必须]
 - `.phasegate/contracts/*.md` [必须]
 - 对应模块的实现代码 [必须]
 - `.phasegate/scratchpad/{module}/report.md` [可选] — 了解 worker 自述的 issues
@@ -389,7 +389,7 @@ Blocked：module-e（下游依赖 module-d 失败）
 **第二次 review — 独立 AI（空 context）**
 
 **LOAD（只给这些）:**
-- `.phasegate/design/{module}.md` [必须]
+- `.phasegate/tasks/{module}.md` [必须]
 - 对应模块的实现代码 [必须]
 
 **检查问题：**

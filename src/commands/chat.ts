@@ -4,9 +4,33 @@ import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createRunner } from '../core/ai-runner';
 import { ProgressManager } from '../core/progress-manager';
-import { checkPhase0Gate } from '../core/phase-gate';
+import { checkPhase0Gate, detectLocale } from '../core/phase-gate';
 
-const PROMPT_FILE = path.join(__dirname, '..', '..', 'prompts', 'phase0_requirements.md');
+const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
+
+const PROMPT_FILE_BY_LOCALE: Record<string, string> = {
+  zh: 'phase0_requirements.md',
+  ja: 'phase0_requirements_ja.md',
+};
+
+const INITIAL_MESSAGE_BY_LOCALE: Record<string, string> = {
+  zh: '你好！请开始 Phase 0 需求讨论，先问我要开发什么功能。',
+  ja: 'こんにちは！Phase 0 の要件討議を始めましょう。どんな機能を作りたいですか？',
+};
+
+function getPhase0PromptFile(): string {
+  const locale = detectLocale();
+  const file = PROMPT_FILE_BY_LOCALE[locale] ?? 'phase0_requirements_en.md';
+  return path.join(PROMPTS_DIR, file);
+}
+
+function getInitialMessage(): string {
+  const locale = detectLocale();
+  return (
+    INITIAL_MESSAGE_BY_LOCALE[locale] ??
+    'Hello! Let\'s start the Phase 0 requirements discussion. What feature would you like to build?'
+  );
+}
 
 export function createChatCommand(): Command {
   const cmd = new Command('chat');
@@ -28,15 +52,18 @@ export function createChatCommand(): Command {
         process.exit(1);
       }
 
-      let promptContent = '';
-      if (await fse.pathExists(PROMPT_FILE)) {
-        promptContent = await fse.readFile(PROMPT_FILE, 'utf-8');
+      const promptFile = getPhase0PromptFile();
+      const promptFileExists = await fse.pathExists(promptFile);
+      const systemPromptFile = promptFileExists ? promptFile : undefined;
+
+      // Inline prompt: only used when the file is absent (fallback) or to append feature info.
+      // Kept short so it is safe to pass as a shell argument on all platforms.
+      let inlinePrompt = '';
+      if (!promptFileExists) {
+        inlinePrompt = 'You are facilitating a PhaseGate requirements discussion session.';
       }
-
-      let systemPrompt = promptContent || `You are facilitating a PhaseGate requirements discussion session.`;
-
       if (options.feature) {
-        systemPrompt += `\n\nFeature being discussed: ${options.feature}`;
+        inlinePrompt += (inlinePrompt ? '\n\n' : '') + `Feature being discussed: ${options.feature}`;
       }
 
       console.log(chalk.cyan('->') + ' Starting requirements discussion session...');
@@ -45,7 +72,7 @@ export function createChatCommand(): Command {
 
       try {
         const runner = await createRunner(cwd);
-        await runner.chat(systemPrompt);
+        await runner.chat(inlinePrompt, systemPromptFile, getInitialMessage());
       } catch (err) {
         console.error(
           chalk.red('Chat error:'),

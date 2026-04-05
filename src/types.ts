@@ -26,6 +26,7 @@ export interface ContractEntry {
 
 export interface ProjectProgress {
   projectName: string;
+  locale?: string;
   currentPhase: PhaseId;
   requirements: { name: string; status: ItemStatus }[];
   design: {

@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fse from 'fs-extra';
 import chalk from 'chalk';
 import { ProgressManager } from '../core/progress-manager';
+import { detectLocale } from '../core/phase-gate';
 import type { ProjectProgress } from '../types';
 
 const DEFAULT_CONFIG = {
@@ -10,6 +11,89 @@ const DEFAULT_CONFIG = {
   minTestCoverage: 80,
   runner: 'claude',
 };
+
+function buildRequirementsTemplate(locale: string): string {
+  if (locale === 'zh') {
+    return [
+      '# {功能名称}',
+      '',
+      '## 描述',
+      '简要描述功能及其目的。',
+      '',
+      '## 范围',
+      '包含：...',
+      '不包含：...',
+      '',
+      '## 用户故事',
+      '- 作为{用户}，我希望{操作}，以便{收益}',
+      '',
+      '## 边界情况',
+      '| 场景 | 处理方式 |',
+      '|---|---|',
+      '| ... | ... |',
+      '',
+      '## 验收标准',
+      '- [ ] 标准',
+      '',
+      '## 约束',
+      '- 技术：...',
+      '- 性能：...',
+    ].join('\n');
+  }
+  if (locale === 'ja') {
+    return [
+      '# {機能名}',
+      '',
+      '## 説明',
+      '機能とその目的を簡潔に説明してください。',
+      '',
+      '## スコープ',
+      '含む：...',
+      '含まない：...',
+      '',
+      '## ユーザーストーリー',
+      '- {ユーザー}として、{操作}したい。そうすることで{利益}が得られる。',
+      '',
+      '## エッジケース',
+      '| シナリオ | 対処方法 |',
+      '|---|---|',
+      '| ... | ... |',
+      '',
+      '## 受入基準',
+      '- [ ] 基準',
+      '',
+      '## 制約',
+      '- 技術：...',
+      '- パフォーマンス：...',
+    ].join('\n');
+  }
+  // default: English (covers en and any unknown locale)
+  return [
+    '# {feature-name}',
+    '',
+    '## Description',
+    'Briefly describe the feature and its purpose.',
+    '',
+    '## Scope',
+    'IN: ...',
+    'OUT: ...',
+    '',
+    '## User Stories',
+    '- As {user}, I want {action} so that {benefit}',
+    '',
+    '## Edge Cases',
+    '| Scenario | Handling |',
+    '|---|---|',
+    '| ... | ... |',
+    '',
+    '## Acceptance Criteria',
+    '- [ ] criterion',
+    '',
+    '## Constraints',
+    '- Tech: ...',
+    '- Performance: ...',
+  ].join('\n');
+}
 
 export function createInitCommand(): Command {
   const cmd = new Command('init');
@@ -31,34 +115,10 @@ export function createInitCommand(): Command {
       }
 
       await fse.ensureDir(path.join(pgDir, 'requirements'));
-      await fse.ensureDir(path.join(pgDir, 'design'));
+      await fse.ensureDir(path.join(pgDir, 'tasks'));
       await fse.ensureDir(path.join(pgDir, 'contracts'));
 
-      const requirementsTemplate = [
-        '# {feature-name}',
-        '',
-        '## Description',
-        'Briefly describe the feature and its purpose.',
-        '',
-        '## Scope',
-        'IN: ...',
-        'OUT: ...',
-        '',
-        '## User Stories',
-        '- As {user}, I want {action} so that {benefit}',
-        '',
-        '## Edge Cases',
-        '| Scenario | Handling |',
-        '|---|---|',
-        '| ... | ... |',
-        '',
-        '## Acceptance Criteria',
-        '- [ ] criterion',
-        '',
-        '## Constraints',
-        '- Tech: ...',
-        '- Performance: ...',
-      ].join('\n');
+      const requirementsTemplate = buildRequirementsTemplate(detectLocale());
       await fse.writeFile(
         path.join(pgDir, 'requirements', 'requirements.md'),
         requirementsTemplate,
@@ -67,6 +127,7 @@ export function createInitCommand(): Command {
 
       const initialProgress: ProjectProgress = {
         projectName,
+        locale: detectLocale(),
         currentPhase: 0,
         requirements: [],
         design: {
@@ -93,7 +154,7 @@ export function createInitCommand(): Command {
         `  ${chalk.cyan('.phasegate/requirements/')}  requirements documents (template included)`
       );
       console.log(
-        `  ${chalk.cyan('.phasegate/design/')}        module design documents (generated in Phase 1)`
+        `  ${chalk.cyan('.phasegate/tasks/')}         task documents (generated in Phase 1)`
       );
       console.log(
         `  ${chalk.cyan('.phasegate/contracts/')}     interface contracts (generated in Phase 1)`

@@ -8,15 +8,15 @@ export function createReviewCommand(): Command {
   const cmd = new Command('review');
 
   cmd
-    .description('Run independent AI review on a module design document')
-    .argument('<module>', 'module name (matches .phasegate/design/{module}.md)')
+    .description('Run independent AI review on a module task document')
+    .argument('<module>', 'module name (matches .phasegate/tasks/{module}.md)')
     .action(async (moduleName: string) => {
       const cwd = process.cwd();
-      const designPath = path.join(cwd, '.phasegate', 'design', `${moduleName}.md`);
+      const designPath = path.join(cwd, '.phasegate', 'tasks', `${moduleName}.md`);
 
       if (!(await fse.pathExists(designPath))) {
         console.error(
-          chalk.red('Error:') + ` .phasegate/design/${moduleName}.md not found.`
+          chalk.red('Error:') + ` .phasegate/tasks/${moduleName}.md not found.`
         );
         process.exit(1);
       }

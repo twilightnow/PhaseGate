@@ -12,7 +12,7 @@
 
 1. 取 `process.cwd()` 作为项目根目录，`path.basename(cwd)` 作为 `projectName`
 2. 检查 `.phasegate/progress.json` 是否已存在 → 存在则报错退出（防止重复初始化）
-3. 创建目录：`.phasegate/requirements/`、`.phasegate/design/`、`.phasegate/contracts/`
+3. 创建目录：`.phasegate/requirements/`、`.phasegate/tasks/`、`.phasegate/contracts/`
 4. 写入需求模板：`.phasegate/requirements/requirements.md`
 5. 写入初始 `progress.json`（currentPhase = 0，所有列表为空）
 6. 写入 `phasegate.config.json`（默认值见下）
@@ -152,14 +152,14 @@ prompts/phase0_requirements.md
 
 **执行流程：**
 
-1. 检查 `.phasegate/design/<module>.md` 存在
+1. 检查 `.phasegate/tasks/<module>.md` 存在
 2. 扫描 `.phasegate/contracts/`，收集所有 `.md` 文件
 3. 调用 `runner.run([designFile, ...contractFiles], prompt)` → 非交互，捕获输出
 4. 打印 AI 返回结果
 
 **注入 AI 的上下文：**
 
-- `.phasegate/design/<module>.md`（主文档）
+- `.phasegate/tasks/<module>.md`（主文档）
 - `.phasegate/contracts/*.md`（全部契约，不筛选）
 
 文件内容以 `--- FILE: {name} ---` 块格式拼入 prompt 头部。

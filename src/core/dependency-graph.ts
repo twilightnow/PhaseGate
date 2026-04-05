@@ -20,11 +20,11 @@ export interface IDependencyGraph {
 
 export class DependencyGraph implements IDependencyGraph {
   async build(projectRoot: string): Promise<ModuleNode[]> {
-    const designDir = path.join(projectRoot, '.phasegate', 'design');
+    const designDir = path.join(projectRoot, '.phasegate', 'tasks');
     const contractsDir = path.join(projectRoot, '.phasegate', 'contracts');
 
     if (!(await fse.pathExists(designDir))) {
-      throw new Error('.phasegate/design/ directory not found. Complete Phase 1 first.');
+      throw new Error('.phasegate/tasks/ directory not found. Complete Phase 1 first.');
     }
 
     const designFiles = (await fse.readdir(designDir))
@@ -32,7 +32,7 @@ export class DependencyGraph implements IDependencyGraph {
       .map((f) => path.join(designDir, f));
 
     if (designFiles.length === 0) {
-      throw new Error('.phasegate/design/ is empty. Complete Phase 1 first.');
+      throw new Error('.phasegate/tasks/ is empty. Complete Phase 1 first.');
     }
 
     const contractMeta: Array<{ filePath: string; frontmatter: ContractFrontmatter }> = [];
