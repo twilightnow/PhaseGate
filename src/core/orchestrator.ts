@@ -33,7 +33,8 @@ export interface IOrchestrator {
 
 const MAX_RETRIES = 3;
 const SCRATCHPAD_BASE = '.phasegate/scratchpad';
-const ARCH_CONSTRAINTS_REL = path.join('docs', '03_architecture_constraints.md');
+const ARCH_CONSTRAINTS_REL = path.join('docs', 'core', 'architecture-constraints.md');
+const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class Orchestrator implements IOrchestrator {
   private pm = new ProgressManager();
@@ -66,7 +67,11 @@ export class Orchestrator implements IOrchestrator {
     const allResults: ModuleRunResult[] = [];
     const failedModules = new Set<string>();
 
-    for (const wave of waves) {
+    for (let waveIndex = 0; waveIndex < waves.length; waveIndex++) {
+      const wave = waves[waveIndex];
+      console.log(
+        `Wave ${waveIndex + 1}/${waves.length}: ${wave.map((node) => node.name).join(', ')}`
+      );
       // Fork all modules in this wave concurrently (Don't peek / Don't race)
       const waveResults = await Promise.all(
         wave.map((node) => this._runModule(projectRoot, node, failedModules, undefined, runner))
@@ -158,10 +163,16 @@ export class Orchestrator implements IOrchestrator {
 
     const prompt = overridePrompt ?? buildWorkerPrompt(node, scratchpadPath);
     const startMs = Date.now();
+    const timeoutMs = getWorkerTimeoutMs();
+    console.log(`  -> ${node.name} started`);
 
     try {
       const activeRunner = runner ?? (await createRunner(projectRoot));
-      const report = await activeRunner.fork(contextFiles, prompt);
+      const report = await withTimeout(
+        activeRunner.fork(contextFiles, prompt),
+        timeoutMs,
+        `worker timeout after ${formatDuration(timeoutMs)}`
+      );
       const durationMs = Date.now() - startMs;
 
       // Persist report to scratchpad (don't peek was satisfied — process done)
@@ -169,6 +180,10 @@ export class Orchestrator implements IOrchestrator {
         path.join(scratchpadPath, 'report.json'),
         JSON.stringify(report, null, 2),
         'utf-8'
+      );
+
+      console.log(
+        `  ${report.result === 'done' ? '✓' : 'x'} ${node.name} ${report.result} (${formatDuration(durationMs)})`
       );
 
       return {
@@ -179,11 +194,16 @@ export class Orchestrator implements IOrchestrator {
         error: report.result === 'failed' ? report.issues.join('; ') : undefined,
       };
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      const durationMs = Date.now() - startMs;
+      await persistFailureReport(scratchpadPath, node.name, error, durationMs);
+      console.log(`  x ${node.name} failed (${formatDuration(durationMs)}): ${error}`);
+
       return {
         moduleName: node.name,
         status: 'failed',
-        durationMs: Date.now() - startMs,
-        error: err instanceof Error ? err.message : String(err),
+        durationMs,
+        error,
       };
     }
   }
@@ -245,4 +265,62 @@ function buildRetryPrompt(
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function getWorkerTimeoutMs(): number {
+  const raw = process.env['PHASEGATE_WORKER_TIMEOUT_MS'];
+  if (!raw) return DEFAULT_WORKER_TIMEOUT_MS;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_WORKER_TIMEOUT_MS;
+  }
+
+  return parsed;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function persistFailureReport(
+  scratchpadPath: string,
+  moduleName: string,
+  error: string,
+  durationMs: number
+): Promise<void> {
+  const report: WorkerReport = {
+    scope: `${moduleName} - failed execution`,
+    result: 'failed',
+    keyFiles: [],
+    filesChanged: [],
+    issues: [error, `duration: ${formatDuration(durationMs)}`],
+  };
+
+  await fse.writeFile(
+    path.join(scratchpadPath, 'report.json'),
+    JSON.stringify(report, null, 2),
+    'utf-8'
+  );
+}
+
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)}s`;
 }

@@ -57,7 +57,7 @@ const L10N: Record<string, L10n> = {
     notStarted: '（未开始）',
     filledAfterPhase1: '（Phase 1 后填充）',
     none: '无',
-    phaseSummaryHeading: (phase) => `## 阶段 ${phase} 摘要`,
+    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
   },
   ja: {
     phaseNames: {
@@ -84,7 +84,7 @@ const L10N: Record<string, L10n> = {
     notStarted: '（未着手）',
     filledAfterPhase1: '（Phase 1 後に記入）',
     none: 'なし',
-    phaseSummaryHeading: (phase) => `## フェーズ ${phase} サマリー`,
+    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
   },
   en: {
     phaseNames: {

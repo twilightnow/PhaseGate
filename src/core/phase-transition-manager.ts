@@ -1,0 +1,337 @@
+import * as path from 'path';
+import * as fse from 'fs-extra';
+import { ProgressManager } from './progress-manager';
+import type { ContractEntry, ProjectProgress } from '../types';
+import type {
+  ExecutablePhaseId,
+  PhaseExecutionResult,
+  PhaseTransitionResult,
+} from './phase-runtime';
+
+export interface IPhaseTransitionManager {
+  resolve(cwd: string, result: PhaseExecutionResult): Promise<PhaseTransitionResult>;
+}
+
+export class PhaseTransitionManager implements IPhaseTransitionManager {
+  constructor(private readonly pm: ProgressManager = new ProgressManager()) {}
+
+  async resolve(cwd: string, result: PhaseExecutionResult): Promise<PhaseTransitionResult> {
+    switch (result.phase) {
+      case 1:
+        return this.resolvePhase1(cwd);
+      case 2:
+        return this.resolvePhase2(cwd);
+      case 3:
+        return this.resolvePhase3(cwd, result);
+      case 4:
+        return this.resolvePhase4(cwd);
+      case 5:
+        return {
+          phase: 5,
+          nextPhase: null,
+          shouldContinue: false,
+          stopReason: 'terminal',
+          message: '✓ Phase 5 complete. Automation finished.',
+        };
+    }
+  }
+
+  private async resolvePhase1(cwd: string): Promise<PhaseTransitionResult> {
+    await this.syncPhase1Outputs(cwd);
+    return {
+      phase: 1,
+      nextPhase: 2,
+      shouldContinue: true,
+      stopReason: 'terminal',
+      message: '✓ Phase advanced to 2 (Design Review).',
+    };
+  }
+
+  private async resolvePhase2(cwd: string): Promise<PhaseTransitionResult> {
+    const passed = await this.checkPhase2Gate(cwd);
+    const progress = this.pm.read(cwd);
+    progress.design.reviewPassed = passed;
+    if (passed) {
+      progress.currentPhase = 3;
+    }
+    this.pm.write(cwd, progress);
+
+    if (passed) {
+      return {
+        phase: 2,
+        nextPhase: 3,
+        shouldContinue: true,
+        stopReason: 'terminal',
+        message: '✓ Phase advanced to 3 (Parallel Module Development).',
+      };
+    }
+
+    return {
+      phase: 2,
+      nextPhase: null,
+      shouldContinue: false,
+      stopReason: 'gate_failed',
+      message:
+        '! Phase 2 gate not yet passed: not all contracts are finalized. Re-run when the review session is complete.',
+    };
+  }
+
+  private async resolvePhase3(
+    cwd: string,
+    result: PhaseExecutionResult
+  ): Promise<PhaseTransitionResult> {
+    const phase3Results = result.phase3Results ?? [];
+    const allDone = phase3Results.every(
+      (entry) => entry.status === 'done' || entry.status === 'blocked'
+    );
+    const anyFailed = phase3Results.some((entry) => entry.status === 'failed');
+
+    if (!anyFailed && allDone) {
+      const progress = this.pm.read(cwd);
+      this.appendPhase3Summary(cwd, progress);
+      progress.currentPhase = 4;
+      this.pm.write(cwd, progress);
+
+      return {
+        phase: 3,
+        nextPhase: 4,
+        shouldContinue: true,
+        stopReason: 'terminal',
+        message: '✓ Phase 3 complete. Advancing to Phase 4 (code review).',
+      };
+    }
+
+    return {
+      phase: 3,
+      nextPhase: null,
+      shouldContinue: false,
+      stopReason: 'gate_failed',
+      message: '! Some modules failed. Fix blockers and re-run to resume.',
+    };
+  }
+
+  private async resolvePhase4(cwd: string): Promise<PhaseTransitionResult> {
+    const passed = await this.checkPhase4Gate(cwd);
+    const progress = this.pm.read(cwd);
+    progress.codeReviewPassed = passed;
+    if (passed) {
+      progress.currentPhase = 5;
+    }
+    this.pm.write(cwd, progress);
+
+    if (passed) {
+      return {
+        phase: 4,
+        nextPhase: 5,
+        shouldContinue: true,
+        stopReason: 'terminal',
+        message: '✓ Phase advanced to 5 (Acceptance).',
+      };
+    }
+
+    return {
+      phase: 4,
+      nextPhase: null,
+      shouldContinue: false,
+      stopReason: 'gate_failed',
+      message:
+        '! Phase 4 gate not yet passed: Phase 4 Summary not found in progress.md. Re-run when the review session is complete.',
+    };
+  }
+
+  private async syncPhase1Outputs(cwd: string): Promise<void> {
+    const tasksDir = path.join(cwd, '.phasegate', 'tasks');
+    const contractsDir = path.join(cwd, '.phasegate', 'contracts');
+
+    const taskFiles = await listMarkdownFiles(tasksDir);
+    const contractFiles = await listMarkdownFiles(contractsDir);
+
+    if (taskFiles.length === 0) {
+      throw new Error(
+        'No module design files found in .phasegate/tasks/. Ensure the AI generated at least one task file before advancing.'
+      );
+    }
+    if (contractFiles.length === 0) {
+      throw new Error(
+        'No contract files found in .phasegate/contracts/. Ensure the AI generated at least one contract file before advancing.'
+      );
+    }
+
+    const progress = this.pm.read(cwd);
+    const moduleNames = taskFiles.map((file) => path.basename(file, '.md'));
+
+    progress.design.modules = moduleNames.map((name) => ({ name, status: 'done' }));
+    progress.modules = moduleNames.map((name) => ({
+      name,
+      status: 'pending',
+    }));
+    progress.design.contracts = await Promise.all(
+      contractFiles.map((file) => readContractEntry(file))
+    );
+    progress.design.reviewPassed = false;
+    progress.codeReviewPassed = false;
+    progress.blockers = [];
+    progress.currentPhase = 2;
+
+    this.pm.write(cwd, progress);
+  }
+
+  private async checkPhase2Gate(cwd: string): Promise<boolean> {
+    const contractsDir = path.join(cwd, '.phasegate', 'contracts');
+    const files = await listMarkdownFiles(contractsDir);
+    if (files.length === 0) {
+      return false;
+    }
+
+    for (const file of files) {
+      const content = await fse.readFile(file, 'utf-8');
+      if (parseContractStatus(content) !== 'finalized') {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private async checkPhase4Gate(cwd: string): Promise<boolean> {
+    const mdPath = path.join(cwd, '.phasegate', 'progress.md');
+    if (!(await fse.pathExists(mdPath))) {
+      return false;
+    }
+
+    const content = await fse.readFile(mdPath, 'utf-8');
+    return content.includes('## Phase 4 Summary');
+  }
+
+  private appendPhase3Summary(cwd: string, progress: ProjectProgress): void {
+    const progressMdPath = path.join(cwd, '.phasegate', 'progress.md');
+    if (!fse.existsSync(progressMdPath)) {
+      return;
+    }
+
+    const existing = fse.readFileSync(progressMdPath, 'utf-8');
+    if (existing.includes('## Phase 3 Summary')) {
+      return;
+    }
+
+    const done = progress.modules.filter((entry) => entry.status === 'done');
+    const failed = progress.modules.filter((entry) => entry.status === 'failed');
+    const blocked = progress.modules.filter((entry) => entry.status === 'blocked');
+
+    const lines = [
+      '',
+      '## Phase 3 Summary',
+      '',
+      '### Current State',
+      done.length > 0
+        ? `Completed modules: ${done.map((entry) => entry.name).join(', ')}`
+        : 'Completed modules: none',
+      failed.length > 0
+        ? `Failed modules: ${failed.map(formatModuleReason).join('; ')}`
+        : 'Failed modules: none',
+      blocked.length > 0
+        ? `Blocked modules: ${blocked.map(formatModuleReason).join('; ')}`
+        : 'Blocked modules: none',
+      '',
+      '### Outputs',
+      '- .phasegate/scratchpad/: worker reports updated for all attempted modules',
+      '- progress.json: module runtime statuses synchronized from orchestrator results',
+      '',
+      '### Notes for Phase 4',
+      '- Review only modules listed as done in this summary.',
+      failed.length > 0 || blocked.length > 0
+        ? '- Use the failed/blocked reasons below to explain skipped modules.'
+        : '- No failed or blocked modules were reported by Phase 3.',
+      '',
+    ];
+
+    fse.writeFileSync(progressMdPath, existing + lines.join('\n'), 'utf-8');
+  }
+}
+
+async function listMarkdownFiles(dir: string): Promise<string[]> {
+  if (!(await fse.pathExists(dir))) {
+    return [];
+  }
+
+  return (await fse.readdir(dir))
+    .filter((file) => file.endsWith('.md'))
+    .map((file) => path.join(dir, file));
+}
+
+async function readContractEntry(filePath: string): Promise<ContractEntry> {
+  const content = await fse.readFile(filePath, 'utf-8');
+  const frontmatter = parseFrontmatter(content);
+
+  return {
+    name: frontmatter.name || path.basename(filePath, '.md'),
+    status: parseContractStatus(content),
+    provider: frontmatter.provider || 'unknown',
+    consumers: frontmatter.consumers,
+  };
+}
+
+function parseFrontmatter(content: string): {
+  name: string;
+  provider: string;
+  consumers: string[];
+} {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) {
+    return { name: '', provider: '', consumers: [] };
+  }
+
+  const yaml = match[1];
+  return {
+    name: extractYamlScalar(yaml, 'name'),
+    provider:
+      extractYamlList(yaml, 'provider')[0] || extractYamlScalar(yaml, 'provider'),
+    consumers: extractYamlList(yaml, 'consumers'),
+  };
+}
+
+function parseContractStatus(content: string): ContractEntry['status'] {
+  const match = content.match(/##\s+Status\s*\n([^\n]+)/i);
+  const status = match?.[1]?.trim().toLowerCase();
+  return status === 'finalized' ? 'finalized' : 'draft';
+}
+
+function extractYamlScalar(yaml: string, key: string): string {
+  const regex = new RegExp(`^${key}:\\s*["']?([^"'\\n]+?)["']?\\s*$`, 'm');
+  const match = yaml.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+function extractYamlList(yaml: string, key: string): string[] {
+  const lines = yaml.split('\n');
+  const startIdx = lines.findIndex((line) => new RegExp(`^${key}:\\s*$`).test(line));
+  if (startIdx < 0) {
+    return [];
+  }
+
+  const items: string[] = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const itemMatch = lines[i].match(/^\s+-\s+(.+)$/);
+    if (itemMatch) {
+      items.push(itemMatch[1].trim());
+      continue;
+    }
+
+    if (lines[i].trim() && !lines[i].startsWith(' ')) {
+      break;
+    }
+  }
+
+  return items;
+}
+
+function formatModuleReason(entry: {
+  name?: string;
+  moduleName?: string;
+  blockedBy?: string;
+  error?: string;
+}): string {
+  const name = entry.moduleName ?? entry.name ?? 'unknown-module';
+  const reason = entry.error ?? entry.blockedBy ?? 'no details';
+  return `${name} (${reason})`;
+}

@@ -1,33 +1,100 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import * as path from 'path';
-import * as fse from 'fs-extra';
 import { ProgressManager } from '../core/progress-manager';
-import { Orchestrator, type ModuleRunResult } from '../core/orchestrator';
-import { createRunner } from '../core/ai-runner';
-import { ConstraintChecker } from '../core/constraint-checker';
-import { detectLocale } from '../core/phase-gate';
-import type { ContractEntry, PhaseId, ProjectProgress } from '../types';
+import { PhaseExecutor } from '../core/phase-executor';
+import { PhaseTransitionManager } from '../core/phase-transition-manager';
+import type { ExecutablePhaseId } from '../core/phase-runtime';
+import type { IAiRunner } from '../core/ai-runner';
+import type { ProjectProgress, RunEvent, ToolUseEvent } from '../types';
 
-const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
+// ---- display helpers -------------------------------------------------------
 
-// Phase 0 → phasegate chat
-// Phase 3 → Orchestrator (special path)
-// Phases 1, 2, 4, 5 → runSinglePhase
-const PHASE_META: Record<number, { title: string; promptFile: string }> = {
-  1: { title: 'Design Generation',  promptFile: 'phase1_design.md' },
-  2: { title: 'Design Review',      promptFile: 'phase2_review.md' },
-  4: { title: 'Code Review',        promptFile: 'phase4_code_review.md' },
-  5: { title: 'Acceptance',         promptFile: 'phase5_acceptance.md' },
+const TOOL_SYMBOLS: Record<string, string> = {
+  Write: '+',
+  Edit: '~',
+  Bash: '⚡',
+  TodoWrite: '📋',
+  Task: '✓',
 };
 
-const LOCALIZED_PROMPT_FILES: Partial<Record<PhaseId, Partial<Record<string, string>>>> = {
-  1: {
-    zh: 'phase1_design_zh.md',
-    ja: 'phase1_design_ja.md',
-  },
-};
+function formatToolLine(event: ToolUseEvent): string {
+  const name = event.name;
+  const symbol = TOOL_SYMBOLS[name] ?? '·';
+
+  // TodoWrite / Task: display just the symbol
+  if (name === 'TodoWrite' || name === 'Task') {
+    return `  ${symbol}`;
+  }
+
+  const label = event.input ?? name;
+  return `  ${symbol} ${label}`;
+}
+
+function shouldDisplayTool(event: ToolUseEvent): boolean {
+  return !['Read', 'Glob', 'Grep'].includes(event.name);
+}
+
+// ---- runSinglePhase --------------------------------------------------------
+
+/**
+ * Run a single non-Phase-3 phase with real-time tool-event display.
+ * Display logic is fully contained here; no stdout/console.log outside this function.
+ */
+export async function runSinglePhase(
+  runner: IAiRunner,
+  contextFiles: string[],
+  prompt: string,
+  phase: number,
+  title: string
+): Promise<void> {
+  const spinner = ora(`Phase ${phase}: ${title}...`).start();
+  let spinnerStopped = false;
+  let completionPrinted = false;
+
+  const onEvent = (event: RunEvent): void => {
+    if (event.type === 'tool_use') {
+      if (!shouldDisplayTool(event)) {
+        return;
+      }
+      if (!spinnerStopped) {
+        spinner.stop();
+        spinnerStopped = true;
+      }
+      process.stdout.write(formatToolLine(event) + '\n');
+    } else if (event.type === 'result') {
+      if (!spinnerStopped) {
+        spinner.stop();
+        spinnerStopped = true;
+      }
+      const base = `${chalk.green('✓')} Phase ${phase}: ${title} complete.`;
+      const stats = event.usage
+        ? `  [in: ${event.usage.input_tokens} / out: ${event.usage.output_tokens} tokens | $${event.usage.cost_usd.toFixed(4)}]`
+        : '';
+      console.log(base + stats);
+      completionPrinted = true;
+    }
+  };
+
+  try {
+    await runner.run(contextFiles, prompt, onEvent);
+
+    if (!spinnerStopped) {
+      spinner.succeed(`Phase ${phase}: ${title} complete.`);
+    } else if (!completionPrinted) {
+      console.log(`${chalk.green('✓')} Phase ${phase}: ${title} complete.`);
+    }
+  } catch (err) {
+    if (!spinnerStopped) spinner.stop();
+    console.error(
+      chalk.red('Runner error:'),
+      err instanceof Error ? err.message : err
+    );
+    process.exit(1);
+  }
+}
+
+// ---- command ---------------------------------------------------------------
 
 export function createRunCommand(): Command {
   const cmd = new Command('run');
@@ -52,9 +119,10 @@ export function createRunCommand(): Command {
         process.exit(1);
       }
 
-      const phase = options.phase ?? progress.currentPhase;
+      const forcedPhase = options.phase !== undefined;
+      const requestedPhase = options.phase ?? progress.currentPhase;
 
-      if (phase === 0) {
+      if (requestedPhase === 0) {
         console.log(
           chalk.yellow('!') +
             ' Phase 0 is an interactive session. Run ' +
@@ -64,245 +132,39 @@ export function createRunCommand(): Command {
         process.exit(0);
       }
 
-      if (phase === 3) {
-        await runPhase3(cwd, pm, progress);
-      } else {
-        await runSinglePhase(cwd, pm, phase as PhaseId);
+      const executor = new PhaseExecutor();
+      const transitionManager = new PhaseTransitionManager(pm);
+      let phase = requestedPhase as ExecutablePhaseId;
+
+      while (true) {
+        let executionResult;
+
+        if (phase === 3) {
+          executionResult = await executor.execute(cwd, 3);
+        } else {
+          console.log(chalk.cyan('->') + ` Running Phase ${phase}...`);
+          let prepared;
+          try {
+            prepared = await executor.prepare(cwd, phase as Exclude<ExecutablePhaseId, 3>);
+          } catch (err) {
+            console.error(chalk.red('Error:'), err instanceof Error ? err.message : err);
+            process.exit(1);
+          }
+          await runSinglePhase(prepared.runner, prepared.contextFiles, prepared.prompt, phase, prepared.title);
+          executionResult = { phase };
+        }
+
+        const transition = await transitionManager.resolve(cwd, executionResult);
+        console.log(transition.message);
+
+        if (forcedPhase || !transition.shouldContinue || transition.nextPhase === null) {
+          break;
+        }
+
+        phase = transition.nextPhase;
+        console.log('');
       }
     });
 
   return cmd;
-}
-
-async function runPhase3(
-  cwd: string,
-  pm: ProgressManager,
-  _progress: ProjectProgress
-): Promise<void> {
-  const checker = new ConstraintChecker();
-  const report = checker.check(cwd);
-
-  if (!report.passed) {
-    console.error(chalk.red('Constraint violations detected:'));
-    for (const v of report.violations) {
-      console.error(`  ${chalk.yellow(v.file)}: [${v.rule}] ${v.detail}`);
-    }
-    process.exit(1);
-  }
-
-  console.log(chalk.cyan('->') + ' Launching Orchestrator for Phase 3 (parallel module development)...');
-
-  const orchestrator = new Orchestrator();
-  try {
-    const results = await orchestrator.run(cwd);
-    printOrchestratorResults(results);
-
-    const allDone = results.every((r) => r.status === 'done' || r.status === 'blocked');
-    const anyFailed = results.some((r) => r.status === 'failed');
-    if (!anyFailed && allDone) {
-      pm.updatePhase(cwd, 4);
-      console.log('');
-      console.log(chalk.green('✓') + ' Phase 3 complete. Advancing to Phase 4 (code review).');
-    } else {
-      console.log('');
-      console.log(
-        chalk.yellow('!') + ' Some modules failed. Fix blockers and re-run to resume.'
-      );
-    }
-  } catch (err) {
-    console.error(
-      chalk.red('Orchestrator error:'),
-      err instanceof Error ? err.message : err
-    );
-    process.exit(1);
-  }
-}
-
-async function runSinglePhase(
-  cwd: string,
-  pm: ProgressManager,
-  phase: PhaseId
-): Promise<void> {
-  const meta = PHASE_META[phase];
-  if (!meta) {
-    console.error(chalk.red(`Error: No runner configured for phase ${phase}.`));
-    process.exit(1);
-  }
-
-  console.log(chalk.cyan('->') + ` Running Phase ${phase}: ${meta.title}...`);
-
-  const promptPath = path.join(PROMPTS_DIR, getPromptFileForPhase(phase, meta.promptFile));
-  let prompt: string;
-
-  try {
-    prompt = await fse.readFile(promptPath, 'utf-8');
-  } catch {
-    console.error(
-      chalk.red('Error:') + ` Prompt file not found: ${promptPath}`
-    );
-    process.exit(1);
-  }
-
-  const spinner = ora(`Phase ${phase}: ${meta.title}...`).start();
-  try {
-    const runner = await createRunner(cwd);
-    const result = await runner.run(
-      ['.phasegate/progress.md', 'docs/03_architecture_constraints.md'],
-      prompt
-    );
-    spinner.succeed(`Phase ${phase}: ${meta.title} complete.`);
-
-    if (phase === 1) {
-      await syncPhase1Outputs(cwd, pm);
-      console.log(chalk.green('✓') + ' Phase advanced to 2 (Design Review).');
-    }
-
-    console.log('');
-    console.log(result);
-  } catch (err) {
-    spinner.fail(`Phase ${phase}: ${meta.title} failed.`);
-    console.error(
-      chalk.red('Runner error:'),
-      err instanceof Error ? err.message : err
-    );
-    process.exit(1);
-  }
-}
-
-function getPromptFileForPhase(phase: PhaseId, defaultFile: string): string {
-  const locale = detectLocale();
-  const localizedFile = LOCALIZED_PROMPT_FILES[phase]?.[locale];
-  return localizedFile ?? defaultFile;
-}
-
-async function syncPhase1Outputs(cwd: string, pm: ProgressManager): Promise<void> {
-  const progress = pm.read(cwd);
-  const designDir = path.join(cwd, '.phasegate', 'design');
-  const contractsDir = path.join(cwd, '.phasegate', 'contracts');
-
-  const designFiles = (await listMarkdownFiles(designDir)).map((file) =>
-    path.basename(file, '.md')
-  );
-  const contractFiles = await listMarkdownFiles(contractsDir);
-
-  progress.design.modules = designFiles.map((name) => ({
-    name,
-    status: 'done',
-  }));
-  progress.modules = designFiles.map((name) => {
-    const existing = progress.modules.find((module) => module.name === name);
-    return {
-      name,
-      status: existing?.status ?? 'pending',
-      blockedBy: existing?.blockedBy,
-    };
-  });
-  progress.design.contracts = await Promise.all(
-    contractFiles.map((file) => readContractEntry(file))
-  );
-  progress.currentPhase = 2;
-
-  pm.write(cwd, progress);
-}
-
-async function listMarkdownFiles(dir: string): Promise<string[]> {
-  if (!(await fse.pathExists(dir))) {
-    return [];
-  }
-
-  return (await fse.readdir(dir))
-    .filter((file) => file.endsWith('.md'))
-    .map((file) => path.join(dir, file));
-}
-
-async function readContractEntry(filePath: string): Promise<ContractEntry> {
-  const content = await fse.readFile(filePath, 'utf-8');
-  const frontmatter = parseFrontmatter(content);
-
-  return {
-    name: frontmatter.name || path.basename(filePath, '.md'),
-    status: parseContractStatus(content),
-    provider: frontmatter.provider || 'unknown',
-    consumers: frontmatter.consumers,
-  };
-}
-
-function parseFrontmatter(content: string): {
-  name: string;
-  provider: string;
-  consumers: string[];
-} {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) {
-    return { name: '', provider: '', consumers: [] };
-  }
-
-  const yaml = match[1];
-  return {
-    name: extractYamlScalar(yaml, 'name'),
-    provider: extractYamlList(yaml, 'provider')[0] || extractYamlScalar(yaml, 'provider'),
-    consumers: extractYamlList(yaml, 'consumers'),
-  };
-}
-
-function parseContractStatus(content: string): ContractEntry['status'] {
-  const match = content.match(/##\s+Status\s*\n([^\n]+)/i);
-  const status = match?.[1]?.trim().toLowerCase();
-  return status === 'finalized' ? 'finalized' : 'draft';
-}
-
-function extractYamlScalar(yaml: string, key: string): string {
-  const regex = new RegExp(`^${key}:\\s*["']?([^"'\\n]+?)["']?\\s*$`, 'm');
-  const match = yaml.match(regex);
-  return match ? match[1].trim() : '';
-}
-
-function extractYamlList(yaml: string, key: string): string[] {
-  const lines = yaml.split('\n');
-  const startIdx = lines.findIndex((line) => new RegExp(`^${key}:\\s*$`).test(line));
-  if (startIdx < 0) {
-    return [];
-  }
-
-  const items: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const itemMatch = lines[i].match(/^\s+-\s+(.+)$/);
-    if (itemMatch) {
-      items.push(itemMatch[1].trim());
-      continue;
-    }
-
-    if (lines[i].trim() && !lines[i].startsWith(' ')) {
-      break;
-    }
-  }
-
-  return items;
-}
-
-function printOrchestratorResults(results: ModuleRunResult[]): void {
-  console.log('');
-  console.log(chalk.bold('Phase 3 Results'));
-  console.log(chalk.dim('-'.repeat(40)));
-
-  const done = results.filter((r) => r.status === 'done');
-  const failed = results.filter((r) => r.status === 'failed');
-  const blocked = results.filter((r) => r.status === 'blocked');
-
-  for (const r of done) {
-    console.log(`  ${chalk.green('✓')} ${r.moduleName} (${(r.durationMs / 1000).toFixed(1)}s)`);
-  }
-  for (const r of failed) {
-    console.log(`  ${chalk.red('x')} ${r.moduleName} - ${r.error ?? 'failed'}`);
-  }
-  for (const r of blocked) {
-    console.log(`  ${chalk.yellow('!')} ${r.moduleName} - ${r.error ?? 'blocked'}`);
-  }
-
-  console.log('');
-  console.log(
-    `  ${chalk.green(String(done.length) + ' done')}` +
-      `  ${chalk.red(String(failed.length) + ' failed')}` +
-      `  ${chalk.yellow(String(blocked.length) + ' blocked')}`
-  );
 }

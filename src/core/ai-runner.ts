@@ -1,10 +1,10 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import type { WorkerReport } from '../types';
+import type { WorkerReport, RunEvent, ToolUseEvent, ResultEvent } from '../types';
 
 export interface IAiRunner {
-  run(files: string[], prompt: string): Promise<string>;
+  run(files: string[], prompt: string, onEvent?: (event: RunEvent) => void): Promise<string>;
   fork(files: string[], prompt: string): Promise<WorkerReport>;
   chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void>;
 }
@@ -62,8 +62,11 @@ const RUNNER_ALIASES: Record<string, RunnerName> = {
 export class CliRunner implements IAiRunner {
   constructor(private readonly definition: RunnerDefinition) {}
 
-  async run(files: string[], prompt: string): Promise<string> {
+  async run(files: string[], prompt: string, onEvent?: (event: RunEvent) => void): Promise<string> {
     const fullPrompt = await buildContextPrompt(files, prompt);
+    if (onEvent && this.definition.command === 'claude') {
+      return spawnCliStreaming(fullPrompt, onEvent);
+    }
     const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
     return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
   }
@@ -191,6 +194,110 @@ function spawnCliInteractive(command: string, args: string[]): Promise<void> {
 
     proc.on('error', reject);
   });
+}
+
+function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', ['--output-format', 'stream-json', '--print'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+      windowsHide: true,
+    });
+
+    if (proc.stdin) {
+      proc.stdin.write(prompt);
+      proc.stdin.end();
+    }
+
+    let buffer = '';
+    let resultText = '';
+    let stderr = '';
+
+    const processStreamLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return; // silently skip malformed JSON
+      }
+
+      if (!parsed || typeof parsed !== 'object') return;
+      const obj = parsed as Record<string, unknown>;
+
+      if (obj['type'] === 'assistant') {
+        const message = obj['message'] as Record<string, unknown> | undefined;
+        const content = message?.['content'];
+        if (!Array.isArray(content)) return;
+
+        for (const block of content) {
+          if (!block || typeof block !== 'object') continue;
+          const b = block as Record<string, unknown>;
+          if (b['type'] !== 'tool_use' || typeof b['name'] !== 'string') continue;
+
+          const toolName = b['name'];
+          const inputObj = b['input'] as Record<string, unknown> | undefined;
+          const event: ToolUseEvent = { type: 'tool_use', name: toolName };
+          const extracted = extractToolInput(toolName, inputObj);
+          if (extracted !== undefined) event.input = extracted;
+          onEvent(event);
+        }
+      } else if (obj['type'] === 'result') {
+        const resultEvent: ResultEvent = { type: 'result' };
+        const usage = obj['usage'];
+        if (usage && typeof usage === 'object') {
+          resultEvent.usage = usage as ResultEvent['usage'];
+        }
+        onEvent(resultEvent);
+        resultText = typeof obj['result'] === 'string' ? obj['result'] : '';
+      }
+    };
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        processStreamLine(line);
+      }
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`claude exited with code ${code}\n${stderr}`));
+        return;
+      }
+      processStreamLine(buffer);
+      resolve(resultText);
+    });
+
+    proc.on('error', reject);
+  });
+}
+
+function extractToolInput(name: string, input: Record<string, unknown> | undefined): string | undefined {
+  if (!input) return undefined;
+  switch (name) {
+    case 'Write':
+    case 'Edit':
+      return typeof input['file_path'] === 'string' ? input['file_path'] : undefined;
+    case 'Bash': {
+      const cmd = typeof input['command'] === 'string' ? input['command'] : undefined;
+      return cmd ? cmd.slice(0, 60) : undefined;
+    }
+    case 'TodoWrite':
+    case 'Task':
+      return undefined;
+    default:
+      return undefined;
+  }
 }
 
 export function parseWorkerReport(output: string): WorkerReport {

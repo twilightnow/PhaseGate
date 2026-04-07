@@ -70,3 +70,15 @@ OUT: ...
 - [ ] `.phasegate/requirements/{name}.md` exists
 - [ ] "Description", "Scope", and "Acceptance Criteria" sections are filled in
 - [ ] User has confirmed there are no remaining ambiguities
+
+---
+
+## Termination Behavior (strictly enforced)
+
+Once the document is generated and the gate check passes, your role ends here.
+
+- Inform the user of the document path: `.phasegate/requirements/{name}.md`
+- Inform the user that the next step is to **manually run** `phasegate run` to advance to Phase 1
+- **Do NOT** ask "ready to proceed to the next phase?" or any similar prompt
+- **Do NOT** begin any design, architecture, or implementation work
+- Return control to the user and wait for their next instruction

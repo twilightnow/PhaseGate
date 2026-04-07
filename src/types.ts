@@ -55,3 +55,23 @@ export interface WorkerReport {
   filesChanged: string[];
   issues: string[];
 }
+
+/** Emitted by spawnCliStreaming() for a tool_use content block */
+export interface ToolUseEvent {
+  type: 'tool_use';
+  name: string;
+  /** Extracted display string: file_path for Write/Edit, truncated command for Bash; absent for others */
+  input?: string;
+}
+
+/** Emitted by spawnCliStreaming() when the result event is received */
+export interface ResultEvent {
+  type: 'result';
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+  };
+}
+
+export type RunEvent = ToolUseEvent | ResultEvent;

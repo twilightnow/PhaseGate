@@ -124,7 +124,7 @@ prompts/phase0_requirements.md
 1. 读取 `progress.json`，取 `currentPhase`（`--phase` 可覆盖）
 2. Phase 0 → 打印提示，引导用户执行 `phasegate chat`
 3. Phase 3 → 走独立路径（见下）
-4. 其余阶段 → `runSinglePhase()`
+4. 其余阶段由 `PhaseExecutor.execute(phase)` 执行，再由 `PhaseTransitionManager.resolve()` 统一判定 gate、写回状态与下一阶段
 
 **Phases 1 / 2 / 4 / 5 通用路径：**
 

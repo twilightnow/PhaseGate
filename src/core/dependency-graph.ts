@@ -12,7 +12,7 @@ export interface ModuleNode {
 }
 
 export interface IDependencyGraph {
-  /** Scan design/ + contracts/ dirs, return all module nodes */
+  /** Scan tasks/ + contracts/ dirs, return all module nodes */
   build(projectRoot: string): Promise<ModuleNode[]>;
   /** Topological sort: modules in the same wave can run in parallel */
   getExecutionWaves(nodes: ModuleNode[]): ModuleNode[][];
@@ -35,16 +35,31 @@ export class DependencyGraph implements IDependencyGraph {
       throw new Error('.phasegate/tasks/ is empty. Complete Phase 1 first.');
     }
 
-    const contractMeta: Array<{ filePath: string; frontmatter: ContractFrontmatter }> = [];
+    const moduleNames = new Set(
+      designFiles.map((filePath) => path.basename(filePath, '.md'))
+    );
+    const contractMeta: Array<{
+      filePath: string;
+      frontmatter: ContractFrontmatter;
+      provider?: string;
+    }> = [];
     if (await fse.pathExists(contractsDir)) {
       const files = (await fse.readdir(contractsDir)).filter((f) => f.endsWith('.md'));
       for (const file of files) {
         const filePath = path.join(contractsDir, file);
         const content = await fse.readFile(filePath, 'utf-8');
         const fm = parseFrontmatter(content);
+        const provider = parseContractProvider(content);
 
         if (fm) {
-          contractMeta.push({ filePath, frontmatter: fm });
+          contractMeta.push({
+            filePath,
+            frontmatter: {
+              ...fm,
+              consumers: fm.consumers.map(normalizeModuleIdentifier),
+            },
+            provider: normalizeModuleIdentifier(provider),
+          });
           continue;
         }
 
@@ -55,7 +70,21 @@ export class DependencyGraph implements IDependencyGraph {
             description: '',
             consumers: [],
           },
+          provider: normalizeModuleIdentifier(provider),
         });
+      }
+    }
+
+    const contractProviders = new Map<string, string>();
+    for (const contract of contractMeta) {
+      const contractName = normalizeContractIdentifier(contract.frontmatter.name);
+      if (
+        contractName &&
+        contract.provider &&
+        moduleNames.has(contract.provider) &&
+        !contractProviders.has(contractName)
+      ) {
+        contractProviders.set(contractName, contract.provider);
       }
     }
 
@@ -63,14 +92,10 @@ export class DependencyGraph implements IDependencyGraph {
     for (const designFile of designFiles) {
       const name = path.basename(designFile, '.md');
       const content = await fse.readFile(designFile, 'utf-8');
-      const dependencies = parseDesignDependencies(content);
+      const dependencies = [...resolveModuleDependencies(parseDesignDependencies(content), name, contractProviders, moduleNames)];
 
       const contractFiles = contractMeta
-        .filter((cm) =>
-          cm.frontmatter.consumers.length === 0
-            ? true
-            : cm.frontmatter.consumers.includes(name)
-        )
+        .filter((cm) => cm.provider === name || cm.frontmatter.consumers.includes(name))
         .map((cm) => cm.filePath);
 
       nodes.push({ name, designFile, contractFiles, dependencies });
@@ -140,6 +165,17 @@ function parseFrontmatter(content: string): ContractFrontmatter | null {
   return { name, description, consumers };
 }
 
+function parseContractProvider(content: string): string | undefined {
+  const providerListMatch = content.match(/##\s+Provider\s*\n(?:-+\s*)?([^\n]+)/i);
+  const providerText = providerListMatch?.[1]?.trim();
+  if (!providerText) return undefined;
+  return providerText
+    .replace(/^-\s*/, '')
+    .replace(/\s*\(.+$/, '')
+    .replace(/`/g, '')
+    .trim() || undefined;
+}
+
 function extractYamlScalar(yaml: string, key: string): string {
   const regex = new RegExp(`^${key}:\\s*["']?([^"'\\n]+?)["']?\\s*$`, 'm');
   const match = yaml.match(regex);
@@ -179,6 +215,58 @@ function parseDesignDependencies(content: string): string[] {
     }
   }
   return deps;
+}
+
+function resolveModuleDependencies(
+  rawDependencies: string[],
+  moduleName: string,
+  contractProviders: Map<string, string>,
+  moduleNames: Set<string>
+): Set<string> {
+  const resolved = new Set<string>();
+
+  for (const dependency of rawDependencies) {
+    const normalizedDependency = normalizeModuleIdentifier(dependency);
+
+    if (moduleNames.has(normalizedDependency)) {
+      if (normalizedDependency !== moduleName) {
+        resolved.add(normalizedDependency);
+      }
+      continue;
+    }
+
+    const provider = contractProviders.get(normalizeContractIdentifier(dependency));
+    if (provider && provider !== moduleName) {
+      resolved.add(provider);
+    }
+  }
+
+  return resolved;
+}
+
+function normalizeModuleIdentifier(value: string | undefined): string {
+  if (!value) return '';
+
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s*\(.+$/, '')
+    .replace(/^[*-]\s*/, '')
+    .replace(/[`'"]/g, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[\s_]+/g, '-')
+    .toLowerCase();
+}
+
+function normalizeContractIdentifier(value: string | undefined): string {
+  if (!value) return '';
+
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s*\(.+$/, '')
+    .replace(/^[*-]\s*/, '')
+    .replace(/[`'"]/g, '');
 }
 
 function validateNoCycles(nodes: ModuleNode[]): void {
