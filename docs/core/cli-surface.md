@@ -13,9 +13,9 @@
 
 ## Scope
 
-包含：命令列表、每个命令的主要职责、关键读写文件。
+包含：命令列表、每个命令的主要职责、关键读写文件、scope 级 AI 路由入口。
 
-不包含：交互 prompt 正文、测试矩阵、历史路线图。
+不包含：交互 prompt 正文、测试矩阵、历史设计讨论。
 
 ## Registered Commands
 
@@ -36,19 +36,23 @@ CLI 入口：`src/index.ts`
 - 创建 `requirements/`、`tasks/`、`contracts/`
 - 生成 `requirements.md`
 - 写入初始 `progress.json`、`progress.md`、`phasegate.config.json`
+- 默认生成 `aiProfiles` / `aiRouting`，启用 scope-based AI routing
 
 ### `phasegate chat`
 
 - 只用于 Phase 0
 - 按 locale 选择需求讨论 prompt
 - 会话结束后立即执行 Phase 0 gate
+- runner scope：`chat`
 
 ### `phasegate run`
 
 - 默认读取 `progress.json.currentPhase`
 - `--phase <n>` 可强制执行指定阶段
 - Phase 1 / 2 / 4 / 5 为 prompt 驱动阶段
-- Phase 3 走 orchestrator
+- Phase 3 走 `Orchestrator`
+- Phase 1 / 2 / 4 / 5 分别使用 `phase1` / `phase2` / `phase4` / `phase5` scope
+- Phase 3 先使用 `phase3.coordinator` 生成 coordination brief，再使用 `phase3.worker` 并行 fork worker
 
 ### `phasegate status`
 
@@ -62,18 +66,21 @@ CLI 入口：`src/index.ts`
 ### `phasegate review <module>`
 
 - 对指定模块做补充检查或重试相关流程
+- runner scope：`phase4`
 
 ## Key Internal Chain
 
 - `run` -> `PhaseExecutor`
 - `run` -> `PhaseTransitionManager`
 - `Phase 3` -> `Orchestrator`
+- `createRunner(projectRoot, scope)` -> `scope -> profile -> adapter`
 - 所有状态写回 -> `ProgressManager`
 
 ## Related
 
 - [`workflow-phases.md`](./workflow-phases.md)
 - [`progress-model.md`](./progress-model.md)
+- [`ai-routing.md`](./ai-routing.md)
 - [`../guides/getting-started.md`](../guides/getting-started.md)
 - `src/index.ts`
 - `src/commands/init.ts`

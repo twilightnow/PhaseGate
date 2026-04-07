@@ -93,6 +93,14 @@ interface {InterfaceName} {
 Once finalized, changes require notifying all Consumers and re-running Phase 2 review.
 ```
 
+Strict formatting rules for every contract file:
+- Use exactly the frontmatter fields shown above: `name`, `description`, `consumers`
+- Do NOT add extra frontmatter keys such as `status`, `version`, `provider`, or `providers`
+- `## Status` must be a single plain-text line containing exactly `draft`
+- Do NOT use bullets, tables, YAML, or metadata under `## Status`
+- `## Provider` must remain a markdown body section, not a frontmatter field
+- Keep all headings exactly as shown in the template
+
 ---
 
 ## Phase 1 Summary Format

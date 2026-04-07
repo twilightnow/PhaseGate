@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import { ProgressManager } from './progress-manager';
+import { PhaseArtifactBuilder } from './phase-artifact-builder';
 import type { ContractEntry, ProjectProgress } from '../types';
 import type {
   ExecutablePhaseId,
@@ -13,7 +14,10 @@ export interface IPhaseTransitionManager {
 }
 
 export class PhaseTransitionManager implements IPhaseTransitionManager {
-  constructor(private readonly pm: ProgressManager = new ProgressManager()) {}
+  constructor(
+    private readonly pm: ProgressManager = new ProgressManager(),
+    private readonly artifacts: PhaseArtifactBuilder = new PhaseArtifactBuilder()
+  ) {}
 
   async resolve(cwd: string, result: PhaseExecutionResult): Promise<PhaseTransitionResult> {
     switch (result.phase) {
@@ -26,6 +30,8 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
       case 4:
         return this.resolvePhase4(cwd);
       case 5:
+        this.artifacts.ensureAcceptanceGuide(cwd, this.pm.read(cwd));
+        this.artifacts.appendPhase5Summary(cwd, this.pm.read(cwd));
         return {
           phase: 5,
           nextPhase: null,
@@ -88,7 +94,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
 
     if (!anyFailed && allDone) {
       const progress = this.pm.read(cwd);
-      this.appendPhase3Summary(cwd, progress);
+      this.artifacts.appendPhase3Summary(cwd, progress);
       progress.currentPhase = 4;
       this.pm.write(cwd, progress);
 
@@ -111,6 +117,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
   }
 
   private async resolvePhase4(cwd: string): Promise<PhaseTransitionResult> {
+    this.artifacts.appendPhase4Summary(cwd, this.pm.read(cwd));
     const passed = await this.checkPhase4Gate(cwd);
     const progress = this.pm.read(cwd);
     progress.codeReviewPassed = passed;
@@ -202,51 +209,6 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
     const content = await fse.readFile(mdPath, 'utf-8');
     return content.includes('## Phase 4 Summary');
   }
-
-  private appendPhase3Summary(cwd: string, progress: ProjectProgress): void {
-    const progressMdPath = path.join(cwd, '.phasegate', 'progress.md');
-    if (!fse.existsSync(progressMdPath)) {
-      return;
-    }
-
-    const existing = fse.readFileSync(progressMdPath, 'utf-8');
-    if (existing.includes('## Phase 3 Summary')) {
-      return;
-    }
-
-    const done = progress.modules.filter((entry) => entry.status === 'done');
-    const failed = progress.modules.filter((entry) => entry.status === 'failed');
-    const blocked = progress.modules.filter((entry) => entry.status === 'blocked');
-
-    const lines = [
-      '',
-      '## Phase 3 Summary',
-      '',
-      '### Current State',
-      done.length > 0
-        ? `Completed modules: ${done.map((entry) => entry.name).join(', ')}`
-        : 'Completed modules: none',
-      failed.length > 0
-        ? `Failed modules: ${failed.map(formatModuleReason).join('; ')}`
-        : 'Failed modules: none',
-      blocked.length > 0
-        ? `Blocked modules: ${blocked.map(formatModuleReason).join('; ')}`
-        : 'Blocked modules: none',
-      '',
-      '### Outputs',
-      '- .phasegate/scratchpad/: worker reports updated for all attempted modules',
-      '- progress.json: module runtime statuses synchronized from orchestrator results',
-      '',
-      '### Notes for Phase 4',
-      '- Review only modules listed as done in this summary.',
-      failed.length > 0 || blocked.length > 0
-        ? '- Use the failed/blocked reasons below to explain skipped modules.'
-        : '- No failed or blocked modules were reported by Phase 3.',
-      '',
-    ];
-
-    fse.writeFileSync(progressMdPath, existing + lines.join('\n'), 'utf-8');
-  }
 }
 
 async function listMarkdownFiles(dir: string): Promise<string[]> {
@@ -266,7 +228,7 @@ async function readContractEntry(filePath: string): Promise<ContractEntry> {
   return {
     name: frontmatter.name || path.basename(filePath, '.md'),
     status: parseContractStatus(content),
-    provider: frontmatter.provider || 'unknown',
+    provider: frontmatter.provider || frontmatter.providers[0] || 'unknown',
     consumers: frontmatter.consumers,
   };
 }
@@ -274,11 +236,12 @@ async function readContractEntry(filePath: string): Promise<ContractEntry> {
 function parseFrontmatter(content: string): {
   name: string;
   provider: string;
+  providers: string[];
   consumers: string[];
 } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
-    return { name: '', provider: '', consumers: [] };
+    return { name: '', provider: '', providers: [], consumers: [] };
   }
 
   const yaml = match[1];
@@ -286,14 +249,21 @@ function parseFrontmatter(content: string): {
     name: extractYamlScalar(yaml, 'name'),
     provider:
       extractYamlList(yaml, 'provider')[0] || extractYamlScalar(yaml, 'provider'),
+    providers: extractYamlList(yaml, 'providers'),
     consumers: extractYamlList(yaml, 'consumers'),
   };
 }
 
 function parseContractStatus(content: string): ContractEntry['status'] {
-  const match = content.match(/##\s+Status\s*\n([^\n]+)/i);
-  const status = match?.[1]?.trim().toLowerCase();
-  return status === 'finalized' ? 'finalized' : 'draft';
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const frontmatter = frontmatterMatch?.[1] ?? '';
+  const frontmatterStatus = extractYamlScalar(frontmatter, 'status').toLowerCase();
+
+  const statusSectionMatch = content.match(/##\s+Status\s*\n([^\n]+)/i);
+  const statusSectionValue = statusSectionMatch?.[1]?.trim().toLowerCase() ?? '';
+
+  const normalized = statusSectionValue || frontmatterStatus;
+  return ['finalized', 'active', 'stable', 'defined'].includes(normalized) ? 'finalized' : 'draft';
 }
 
 function extractYamlScalar(yaml: string, key: string): string {
@@ -325,13 +295,3 @@ function extractYamlList(yaml: string, key: string): string[] {
   return items;
 }
 
-function formatModuleReason(entry: {
-  name?: string;
-  moduleName?: string;
-  blockedBy?: string;
-  error?: string;
-}): string {
-  const name = entry.moduleName ?? entry.name ?? 'unknown-module';
-  const reason = entry.error ?? entry.blockedBy ?? 'no details';
-  return `${name} (${reason})`;
-}

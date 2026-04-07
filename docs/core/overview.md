@@ -81,3 +81,4 @@
 - [`progress-model.md`](./progress-model.md)
 - [`architecture-constraints.md`](./architecture-constraints.md)
 - [`cli-surface.md`](./cli-surface.md)
+- [`ai-routing.md`](./ai-routing.md)

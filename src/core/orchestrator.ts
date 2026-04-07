@@ -41,11 +41,14 @@ export class Orchestrator implements IOrchestrator {
   private dg = new DependencyGraph();
 
   async run(projectRoot: string): Promise<ModuleRunResult[]> {
-    const runner = await createRunner(projectRoot);
+    const coordinatorRunner = await createRunner(projectRoot, 'phase3.coordinator');
+    const runner = await createRunner(projectRoot, 'phase3.worker');
     const progress = this.pm.read(projectRoot);
 
     // Build full DAG
     const allNodes = await this.dg.build(projectRoot);
+
+    await this.generateCoordinatorBrief(projectRoot, allNodes, coordinatorRunner);
 
     // Register any DAG module not yet in progress.modules (defensive)
     let dirty = false;
@@ -101,7 +104,7 @@ export class Orchestrator implements IOrchestrator {
     moduleName: string,
     failureContext: string
   ): Promise<ModuleRunResult> {
-    const runner = await createRunner(projectRoot);
+    const runner = await createRunner(projectRoot, 'phase3.worker');
     const allNodes = await this.dg.build(projectRoot);
     const node = allNodes.find((n) => n.name === moduleName);
 
@@ -207,6 +210,42 @@ export class Orchestrator implements IOrchestrator {
       };
     }
   }
+
+  private async generateCoordinatorBrief(
+    projectRoot: string,
+    nodes: ModuleNode[],
+    runner: IAiRunner
+  ): Promise<void> {
+    const scratchpadPath = path.join(projectRoot, SCRATCHPAD_BASE, 'coordinator');
+    await fse.ensureDir(scratchpadPath);
+
+    const contextFiles = await this.buildCoordinatorContextFiles(projectRoot);
+    const prompt = buildCoordinatorPrompt(nodes, scratchpadPath);
+    const brief = await runner.run(contextFiles, prompt);
+
+    await fse.writeFile(path.join(scratchpadPath, 'brief.md'), brief, 'utf-8');
+    console.log(`Coordinator brief written: ${path.join(SCRATCHPAD_BASE, 'coordinator', 'brief.md')}`);
+  }
+
+  private async buildCoordinatorContextFiles(projectRoot: string): Promise<string[]> {
+    const pg = path.join(projectRoot, '.phasegate');
+    const archConstraints = path.join(projectRoot, ARCH_CONSTRAINTS_REL);
+    const progressMd = path.join(pg, 'progress.md');
+    const files: string[] = [];
+
+    if (await fse.pathExists(progressMd)) {
+      files.push(progressMd);
+    }
+
+    files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
+    files.push(...(await listMarkdownFiles(path.join(pg, 'contracts'))));
+
+    if (await fse.pathExists(archConstraints)) {
+      files.push(archConstraints);
+    }
+
+    return files;
+  }
 }
 
 // ── prompt builders ───────────────────────────────────────────────────────────
@@ -242,6 +281,30 @@ function buildWorkerPrompt(node: ModuleNode, scratchpadPath: string): string {
   ]
     .filter((l) => l !== undefined)
     .join('\n');
+}
+
+function buildCoordinatorPrompt(nodes: ModuleNode[], scratchpadPath: string): string {
+  const moduleList = nodes.length > 0 ? nodes.map((node) => `- ${node.name}`).join('\n') : '- (none)';
+
+  return [
+    'You are the Phase 3 coordinator for PhaseGate.',
+    'Review the current module plan and produce a concise execution brief for the orchestrator and workers.',
+    '',
+    'Modules in scope:',
+    moduleList,
+    '',
+    'Write the response as markdown with these sections only:',
+    '## Execution Order',
+    '- ordered wave-level summary',
+    '',
+    '## Dependency Risks',
+    '- contracts or dependency edges that are easy to break',
+    '',
+    '## Worker Guidance',
+    '- implementation cautions workers should keep in mind',
+    '',
+    `The brief will be stored at: ${path.join(scratchpadPath, 'brief.md')}`,
+  ].join('\n');
 }
 
 function buildRetryPrompt(
@@ -323,4 +386,14 @@ function formatDuration(durationMs: number): string {
   }
 
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+async function listMarkdownFiles(dir: string): Promise<string[]> {
+  if (!(await fse.pathExists(dir))) {
+    return [];
+  }
+
+  return (await fse.readdir(dir))
+    .filter((file) => file.endsWith('.md'))
+    .map((file) => path.join(dir, file));
 }

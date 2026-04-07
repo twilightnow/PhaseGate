@@ -8,6 +8,7 @@ import { detectLocale } from './phase-gate';
 import { Orchestrator, type ModuleRunResult } from './orchestrator';
 import type { PhaseId } from '../types';
 import type { ExecutablePhaseId, PhaseExecutionResult } from './phase-runtime';
+import type { RunnerScope } from './ai-runner';
 
 const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
 
@@ -54,7 +55,7 @@ export class PhaseExecutor implements IPhaseExecutor {
     }
 
     const contextFiles = await this.buildPhaseContextFiles(cwd, phase);
-    const runner = await createRunner(cwd);
+    const runner = await createRunner(cwd, this.getRunnerScopeForPhase(phase));
 
     return { runner, contextFiles, prompt, title: meta.title };
   }
@@ -125,7 +126,7 @@ export class PhaseExecutor implements IPhaseExecutor {
     const spinner = ora(`Phase ${phase}: ${meta.title}...`).start();
 
     try {
-      const runner = await createRunner(cwd);
+      const runner = await createRunner(cwd, this.getRunnerScopeForPhase(phase));
       const result = await runner.run(contextFiles, prompt);
       spinner.succeed(`Phase ${phase}: ${meta.title} complete.`);
       console.log('');
@@ -195,6 +196,19 @@ export class PhaseExecutor implements IPhaseExecutor {
     }
 
     return files;
+  }
+
+  private getRunnerScopeForPhase(phase: Exclude<ExecutablePhaseId, 3>): RunnerScope {
+    switch (phase) {
+      case 1:
+        return 'phase1';
+      case 2:
+        return 'phase2';
+      case 4:
+        return 'phase4';
+      case 5:
+        return 'phase5';
+    }
   }
 
   private printOrchestratorResults(results: ModuleRunResult[]): void {

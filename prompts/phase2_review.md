@@ -43,6 +43,7 @@ Work through every design book and contract in sequence. Check each item below.
 - [ ] `Definition` block contains a valid, fully-typed TypeScript interface
 - [ ] `Status` is `draft`
 - [ ] `Change Rule` section is present
+- [ ] If a contract arrived in any non-canonical format, normalize it to the canonical PhaseGate contract template before finishing Pass 1
 
 ### Cross-Validation (Requirements ↔ Design)
 - [ ] Every acceptance criterion in requirements maps to at least one module's `Responsibility`
@@ -103,8 +104,13 @@ FAIL — P0 issues found:
 
 ## Output (on PASS)
 
-1. Set `Status: finalized` in every `.phasegate/contracts/*.md` file (replace `draft`).
-2. Append Phase 2 Summary to `.phasegate/progress.md`:
+1. Normalize every `.phasegate/contracts/*.md` file to the canonical PhaseGate template before finalizing:
+   - frontmatter keys must be exactly `name`, `description`, `consumers`
+   - remove extra frontmatter keys such as `status`, `version`, `provider`, or `providers`
+   - `## Status` must be a single plain-text line
+   - `## Provider`, `## Consumers`, and `## Change Rule` must remain markdown body sections
+2. Set `Status` to the exact single line `finalized` in every `.phasegate/contracts/*.md` file (replace `draft` or any other prior status representation).
+3. Append Phase 2 Summary to `.phasegate/progress.md`:
 
 ```markdown
 ## Phase 2 Summary
@@ -133,7 +139,7 @@ Design review passed. All module responsibilities are unambiguous, contracts are
 
 - [ ] Pass 1 checklist: zero P0 issues remaining across all design books and contracts
 - [ ] Pass 2 checklist: zero P0 issues remaining across all design books
-- [ ] All `.phasegate/contracts/*.md` have `Status: finalized`
+- [ ] All `.phasegate/contracts/*.md` use the canonical template and have `## Status` followed by the exact single line `finalized`
 - [ ] Phase 2 Summary appended to `.phasegate/progress.md`
 
 ---

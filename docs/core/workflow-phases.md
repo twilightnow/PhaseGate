@@ -13,7 +13,7 @@
 
 ## Scope
 
-包含：阶段总览、入口命令、自动推进行为、各阶段 gate。
+包含：阶段总览、入口命令、自动推进规则、各阶段 gate、Phase 3 的 coordinator / worker 分工。
 
 不包含：prompt 正文、长篇产品讨论、测试细节。
 
@@ -23,17 +23,18 @@
 |---|---|---|---|
 | 0 | Requirements Discussion | `phasegate chat` | 已实现 |
 | 1 | Design Generation | `phasegate run` | 已实现 |
-| 2 | Design Review | `phasegate run` | 已实现为 prompt 驱动 |
+| 2 | Design Review | `phasegate run` | 已实现 |
 | 3 | Parallel Module Development | `phasegate run` | 已实现 |
-| 4 | Code Review | `phasegate run` | 已实现为 prompt 驱动 |
-| 5 | Acceptance | `phasegate run` | 已实现为 prompt 驱动 |
+| 4 | Code Review | `phasegate run` | 已实现 |
+| 5 | Acceptance | `phasegate run` | 已实现 |
 
 ## Key Facts / Decisions / Constraints
 
 - Phase 0 不走 `run`，而是强制使用 `chat`。
 - 未指定 `--phase` 时，`phasegate run` 会依据 `progress.json.currentPhase` 连续推进后续阶段。
-- 每个阶段完成后都会先过 gate，再写回 `progress.json` / `progress.md`。
+- 每个阶段完成后都先过 gate，再写回 `progress.json` / `progress.md`。
 - Phase 3 是唯一带专门调度器和断点续跑逻辑的阶段。
+- Phase 3 当前已经区分 `phase3.coordinator` 和 `phase3.worker` 两个 AI scope。
 
 ## Phase 0
 
@@ -82,9 +83,10 @@ Gate 条件：
 
 核心行为：
 
+- 先使用 `phase3.coordinator` runner 生成 coordination brief，写入 `.phasegate/scratchpad/coordinator/brief.md`
 - 基于 `tasks/*.md` 中的依赖关系构建 DAG
-- 按执行波次并行启动模块 worker
-- 已完成模块会在续跑时被跳过
+- 按 wave 并行启动模块 worker，使用 `phase3.worker` runner
+- 已完成模块在续跑时会被跳过
 - 失败模块会阻断下游模块
 
 完成条件：
@@ -94,7 +96,7 @@ Gate 条件：
 
 通过后动作：
 
-- 为 `progress.md` 追加 `Phase 3 Summary`
+- 向 `progress.md` 追加 `Phase 3 Summary`
 - `currentPhase = 4`
 
 ## Phase 4
@@ -123,6 +125,7 @@ Gate 条件：
 
 - [`progress-model.md`](./progress-model.md)
 - [`cli-surface.md`](./cli-surface.md)
+- [`ai-routing.md`](./ai-routing.md)
 - `src/commands/chat.ts`
 - `src/commands/run.ts`
 - `src/core/phase-transition-manager.ts`

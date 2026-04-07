@@ -9,7 +9,23 @@ import type { ProjectProgress } from '../types';
 const DEFAULT_CONFIG = {
   maxLinesPerFile: 500,
   minTestCoverage: 80,
-  runner: 'claude',
+  runner: 'codex',
+  aiProfiles: {
+    default: { adapter: 'codex' },
+    architect: { adapter: 'codex' },
+    reviewer: { adapter: 'codex' },
+    implementer: { adapter: 'codex' },
+  },
+  aiRouting: {
+    default: 'default',
+    chat: 'architect',
+    phase1: 'architect',
+    phase2: 'reviewer',
+    'phase3.coordinator': 'architect',
+    'phase3.worker': 'implementer',
+    phase4: 'reviewer',
+    phase5: 'reviewer',
+  },
 };
 
 function buildRequirementsTemplate(locale: string): string {
@@ -18,7 +34,7 @@ function buildRequirementsTemplate(locale: string): string {
       '# {功能名称}',
       '',
       '## 描述',
-      '简要描述功能及其目的。',
+      '简要描述该功能及其目标。',
       '',
       '## 范围',
       '包含：...',
@@ -40,6 +56,7 @@ function buildRequirementsTemplate(locale: string): string {
       '- 性能：...',
     ].join('\n');
   }
+
   if (locale === 'ja') {
     return [
       '# {機能名}',
@@ -48,14 +65,14 @@ function buildRequirementsTemplate(locale: string): string {
       '機能とその目的を簡潔に説明してください。',
       '',
       '## スコープ',
-      '含む：...',
-      '含まない：...',
+      '含む: ...',
+      '含まない: ...',
       '',
       '## ユーザーストーリー',
-      '- {ユーザー}として、{操作}したい。そうすることで{利益}が得られる。',
+      '- {ユーザー}として、{操作}したい。そうすることで{利益}を得られる。',
       '',
       '## エッジケース',
-      '| シナリオ | 対処方法 |',
+      '| シナリオ | 対応方法 |',
       '|---|---|',
       '| ... | ... |',
       '',
@@ -63,11 +80,11 @@ function buildRequirementsTemplate(locale: string): string {
       '- [ ] 基準',
       '',
       '## 制約',
-      '- 技術：...',
-      '- パフォーマンス：...',
+      '- 技術: ...',
+      '- 性能: ...',
     ].join('\n');
   }
-  // default: English (covers en and any unknown locale)
+
   return [
     '# {feature-name}',
     '',
@@ -119,11 +136,7 @@ export function createInitCommand(): Command {
       await fse.ensureDir(path.join(pgDir, 'contracts'));
 
       const requirementsTemplate = buildRequirementsTemplate(detectLocale());
-      await fse.writeFile(
-        path.join(pgDir, 'requirements', 'requirements.md'),
-        requirementsTemplate,
-        'utf-8'
-      );
+      await fse.writeFile(path.join(pgDir, 'requirements', 'requirements.md'), requirementsTemplate, 'utf-8');
 
       const initialProgress: ProjectProgress = {
         projectName,
@@ -143,22 +156,12 @@ export function createInitCommand(): Command {
       const manager = new ProgressManager();
       manager.write(cwd, initialProgress);
 
-      await fse.writeJson(
-        path.join(pgDir, 'phasegate.config.json'),
-        DEFAULT_CONFIG,
-        { spaces: 2 }
-      );
+      await fse.writeJson(path.join(pgDir, 'phasegate.config.json'), DEFAULT_CONFIG, { spaces: 2 });
 
-      console.log(chalk.green('✓') + ` PhaseGate initialized for "${projectName}"\n`);
-      console.log(
-        `  ${chalk.cyan('.phasegate/requirements/')}  requirements documents (template included)`
-      );
-      console.log(
-        `  ${chalk.cyan('.phasegate/tasks/')}         task documents (generated in Phase 1)`
-      );
-      console.log(
-        `  ${chalk.cyan('.phasegate/contracts/')}     interface contracts (generated in Phase 1)`
-      );
+      console.log(chalk.green('OK') + ` PhaseGate initialized for "${projectName}"\n`);
+      console.log(`  ${chalk.cyan('.phasegate/requirements/')}  requirements documents (template included)`);
+      console.log(`  ${chalk.cyan('.phasegate/tasks/')}         task documents (generated in Phase 1)`);
+      console.log(`  ${chalk.cyan('.phasegate/contracts/')}     interface contracts (generated in Phase 1)`);
       console.log(`  ${chalk.cyan('.phasegate/progress.json')}  project state (source of truth)`);
       console.log(`  ${chalk.cyan('.phasegate/progress.md')}    project progress (human-readable)`);
       console.log(`  ${chalk.cyan('.phasegate/phasegate.config.json')}  configuration\n`);

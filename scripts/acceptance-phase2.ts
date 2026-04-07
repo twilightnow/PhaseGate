@@ -36,23 +36,29 @@ async function runCliAcceptance(sandboxRoot: string): Promise<void> {
   const projectRoot = path.join(sandboxRoot, 'my-project');
   await fse.ensureDir(projectRoot);
 
-  const initOutput = runCli(projectRoot, ['init', 'my-project']);
+  const initOutput = runCli(projectRoot, ['init']);
   assert.match(initOutput, /initialized/i);
 
   const expectedEntries = [
     'contracts',
-    'design',
     'phasegate.config.json',
     'progress.json',
     'progress.md',
     'requirements',
+    'tasks',
   ];
-  const actualEntries = (await fse.readdir(projectRoot)).sort();
+  const actualEntries = (await fse.readdir(path.join(projectRoot, '.phasegate'))).sort();
   assert.deepStrictEqual(actualEntries, expectedEntries);
 
-  const progressJson = await fse.readJson(path.join(projectRoot, 'progress.json'));
+  const progressJson = await fse.readJson(path.join(projectRoot, '.phasegate', 'progress.json'));
   assert.strictEqual(progressJson.projectName, 'my-project');
   assert.strictEqual(progressJson.currentPhase, 0);
+  assert.strictEqual(
+    await fse.pathExists(
+      path.join(projectRoot, '.phasegate', 'requirements', 'requirements.md')
+    ),
+    true
+  );
 
   const statusOutput = runCli(projectRoot, ['status']);
   assert.match(statusOutput, /Phase 0/i);
@@ -67,11 +73,11 @@ async function runCliAcceptance(sandboxRoot: string): Promise<void> {
 
 async function runDependencyGraphAcceptance(sandboxRoot: string): Promise<void> {
   const projectRoot = path.join(sandboxRoot, 'my-project');
-  const designDir = path.join(projectRoot, 'design');
-  const contractsDir = path.join(projectRoot, 'contracts');
+  const tasksDir = path.join(projectRoot, '.phasegate', 'tasks');
+  const contractsDir = path.join(projectRoot, '.phasegate', 'contracts');
 
   await fse.writeFile(
-    path.join(designDir, 'module-a.md'),
+    path.join(tasksDir, 'module-a.md'),
     [
       '# module-a',
       '## Dependencies',
@@ -82,7 +88,7 @@ async function runDependencyGraphAcceptance(sandboxRoot: string): Promise<void> 
   );
 
   await fse.writeFile(
-    path.join(designDir, 'module-b.md'),
+    path.join(tasksDir, 'module-b.md'),
     [
       '# module-b',
       '## Dependencies',
@@ -122,7 +128,7 @@ async function runDependencyGraphAcceptance(sandboxRoot: string): Promise<void> 
   assert.deepStrictEqual(moduleA?.contractFiles, []);
 
   await fse.writeFile(
-    path.join(designDir, 'module-c.md'),
+    path.join(tasksDir, 'module-c.md'),
     [
       '# module-c',
       '## Dependencies',
@@ -134,7 +140,7 @@ async function runDependencyGraphAcceptance(sandboxRoot: string): Promise<void> 
   );
 
   await fse.writeFile(
-    path.join(designDir, 'module-b.md'),
+    path.join(tasksDir, 'module-b.md'),
     [
       '# module-b',
       '## Dependencies',

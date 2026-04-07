@@ -8,21 +8,18 @@ import type { ExecutablePhaseId } from '../core/phase-runtime';
 import type { IAiRunner } from '../core/ai-runner';
 import type { ProjectProgress, RunEvent, ToolUseEvent } from '../types';
 
-// ---- display helpers -------------------------------------------------------
-
 const TOOL_SYMBOLS: Record<string, string> = {
   Write: '+',
   Edit: '~',
-  Bash: '⚡',
-  TodoWrite: '📋',
-  Task: '✓',
+  Bash: '$',
+  TodoWrite: '*',
+  Task: '=',
 };
 
 function formatToolLine(event: ToolUseEvent): string {
   const name = event.name;
-  const symbol = TOOL_SYMBOLS[name] ?? '·';
+  const symbol = TOOL_SYMBOLS[name] ?? '.';
 
-  // TodoWrite / Task: display just the symbol
   if (name === 'TodoWrite' || name === 'Task') {
     return `  ${symbol}`;
   }
@@ -35,12 +32,6 @@ function shouldDisplayTool(event: ToolUseEvent): boolean {
   return !['Read', 'Glob', 'Grep'].includes(event.name);
 }
 
-// ---- runSinglePhase --------------------------------------------------------
-
-/**
- * Run a single non-Phase-3 phase with real-time tool-event display.
- * Display logic is fully contained here; no stdout/console.log outside this function.
- */
 export async function runSinglePhase(
   runner: IAiRunner,
   contextFiles: string[],
@@ -67,9 +58,13 @@ export async function runSinglePhase(
         spinner.stop();
         spinnerStopped = true;
       }
-      const base = `${chalk.green('✓')} Phase ${phase}: ${title} complete.`;
+      const base = `${chalk.green('OK')} Phase ${phase}: ${title} complete.`;
+      const costText =
+        typeof event.usage?.cost_usd === 'number'
+          ? ` | $${event.usage.cost_usd.toFixed(4)}`
+          : '';
       const stats = event.usage
-        ? `  [in: ${event.usage.input_tokens} / out: ${event.usage.output_tokens} tokens | $${event.usage.cost_usd.toFixed(4)}]`
+        ? `  [in: ${event.usage.input_tokens} / out: ${event.usage.output_tokens} tokens${costText}]`
         : '';
       console.log(base + stats);
       completionPrinted = true;
@@ -82,19 +77,14 @@ export async function runSinglePhase(
     if (!spinnerStopped) {
       spinner.succeed(`Phase ${phase}: ${title} complete.`);
     } else if (!completionPrinted) {
-      console.log(`${chalk.green('✓')} Phase ${phase}: ${title} complete.`);
+      console.log(`${chalk.green('OK')} Phase ${phase}: ${title} complete.`);
     }
   } catch (err) {
     if (!spinnerStopped) spinner.stop();
-    console.error(
-      chalk.red('Runner error:'),
-      err instanceof Error ? err.message : err
-    );
+    console.error(chalk.red('Runner error:'), err instanceof Error ? err.message : err);
     process.exit(1);
   }
 }
-
-// ---- command ---------------------------------------------------------------
 
 export function createRunCommand(): Command {
   const cmd = new Command('run');
@@ -150,6 +140,7 @@ export function createRunCommand(): Command {
             console.error(chalk.red('Error:'), err instanceof Error ? err.message : err);
             process.exit(1);
           }
+
           await runSinglePhase(prepared.runner, prepared.contextFiles, prepared.prompt, phase, prepared.title);
           executionResult = { phase };
         }

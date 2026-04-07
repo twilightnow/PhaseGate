@@ -9,11 +9,11 @@
 
 ## Purpose
 
-提供最短路径的安装、初始化和日常使用指南。
+提供最短路径的安装、初始化和日常使用指引。
 
 ## Scope
 
-包含：环境准备、启动方式、典型命令流、常见问题。
+包含：环境准备、启动方式、典型命令流、AI 路由默认值、常见问题。
 
 不包含：内部实现细节、完整验收清单。
 
@@ -21,7 +21,7 @@
 
 - Node.js 18+
 - npm
-- 至少一个可用的 AI CLI：`claude`、`gemini` 或 `codex`
+- 至少一个可用的 AI CLI；当前已适配 `claude`（Claude Code）或 `codex`
 
 ## Run Commands
 
@@ -78,6 +78,23 @@ phasegate progress
 phasegate review <module>
 ```
 
+## Default AI Routing
+
+`phasegate init` 默认写入以下角色路由：
+
+- `chat` / `phase1` -> `architect`
+- `phase2` / `phase4` / `phase5` -> `reviewer`
+- `phase3.coordinator` -> `architect`
+- `phase3.worker` -> `implementer`
+
+默认 adapter 组合：
+
+- `architect` -> `codex`
+- `reviewer` -> `claude-code`
+- `implementer` -> `codex`
+
+如需调整，编辑 `.phasegate/phasegate.config.json` 中的 `aiProfiles` 和 `aiRouting`。
+
 ## Command Use Notes
 
 - Phase 0 必须用 `chat`，不要用 `run`。
@@ -105,6 +122,10 @@ phasegate chat
 ### `Prompt file not found`
 
 通常说明 `prompts/` 缺失，或运行目录不正确。
+
+### `Unsupported runner "gemini"`
+
+说明当前版本已经启用 adapter-based routing，但只适配 `claude-code` 和 `codex`。请把旧 `runner` 或 `aiProfiles.*.adapter` 改成其中之一。
 
 ### `Circular dependency: ...`
 

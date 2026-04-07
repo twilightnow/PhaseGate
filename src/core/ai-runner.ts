@@ -9,10 +9,30 @@ export interface IAiRunner {
   chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void>;
 }
 
-type RunnerName = 'claude' | 'gemini' | 'codex';
+export type AdapterName = 'claude-code' | 'codex';
+export type RunnerScope =
+  | 'default'
+  | 'chat'
+  | 'phase1'
+  | 'phase2'
+  | 'phase3.coordinator'
+  | 'phase3.worker'
+  | 'phase4'
+  | 'phase5';
+
+interface AiProfileConfig {
+  adapter?: string;
+  options?: Record<string, unknown>;
+}
+
+interface RoutingConfig {
+  [scope: string]: string | undefined;
+}
 
 interface RunnerConfig {
   runner?: string;
+  aiProfiles?: Record<string, AiProfileConfig>;
+  aiRouting?: RoutingConfig;
 }
 
 interface RunnerDefinition {
@@ -23,8 +43,16 @@ interface RunnerDefinition {
   useStdinForPrompt?: boolean;
 }
 
-const RUNNER_DEFINITIONS: Record<RunnerName, RunnerDefinition> = {
-  claude: {
+const CODEX_CONFIG_ARGS = [
+  '-c',
+  'approvals_reviewer="user"',
+  '-c',
+  'windows.sandbox="unelevated"',
+];
+const CODEX_SANDBOX_ARGS = ['-s', 'workspace-write'];
+
+const ADAPTER_DEFINITIONS: Record<AdapterName, RunnerDefinition> = {
+  'claude-code': {
     command: 'claude',
     // Prompt is piped via stdin to avoid multi-line shell-escaping issues on Windows
     buildRunArgs: () => ['--print'],
@@ -39,21 +67,28 @@ const RUNNER_DEFINITIONS: Record<RunnerName, RunnerDefinition> = {
       return args;
     },
   },
-  gemini: {
-    command: 'gemini',
-    buildRunArgs: (prompt) => ['-p', prompt],
-    buildChatArgs: (systemPrompt) => (systemPrompt ? ['-i', systemPrompt] : []),
-  },
   codex: {
     command: 'codex',
-    buildRunArgs: (prompt) => ['exec', prompt],
-    buildChatArgs: (systemPrompt) => (systemPrompt ? [systemPrompt] : []),
+    // `codex exec` accepts `-` to read the prompt from stdin.
+    buildRunArgs: () => [
+      'exec',
+      ...CODEX_CONFIG_ARGS,
+      '--skip-git-repo-check',
+      ...CODEX_SANDBOX_ARGS,
+      '-',
+    ],
+    useStdinForPrompt: true,
+    buildChatArgs: (systemPrompt) => [
+      ...CODEX_CONFIG_ARGS,
+      ...CODEX_SANDBOX_ARGS,
+      ...(systemPrompt ? [systemPrompt] : []),
+    ],
   },
 };
 
-const RUNNER_ALIASES: Record<string, RunnerName> = {
-  claude: 'claude',
-  gemini: 'gemini',
+const LEGACY_RUNNER_ALIASES: Record<string, AdapterName> = {
+  claude: 'claude-code',
+  'claude-code': 'claude-code',
   codex: 'codex',
   openai: 'codex',
   chatgpt: 'codex',
@@ -79,6 +114,15 @@ export class CliRunner implements IAiRunner {
   }
 
   async chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void> {
+    if (this.definition.command === 'codex') {
+      const startupPrompt = await buildCodexChatPrompt(systemPrompt, systemPromptFile, initialMessage);
+      await spawnCliInteractive(
+        this.definition.command,
+        this.definition.buildChatArgs(startupPrompt)
+      );
+      return;
+    }
+
     await spawnCliInteractive(
       this.definition.command,
       this.definition.buildChatArgs(systemPrompt, systemPromptFile, initialMessage)
@@ -88,13 +132,16 @@ export class CliRunner implements IAiRunner {
 
 export class ClaudeRunner extends CliRunner {
   constructor() {
-    super(RUNNER_DEFINITIONS.claude);
+    super(ADAPTER_DEFINITIONS['claude-code']);
   }
 }
 
-export async function createRunner(projectRoot: string = process.cwd()): Promise<IAiRunner> {
-  const runnerName = await loadRunnerName(projectRoot);
-  return new CliRunner(RUNNER_DEFINITIONS[runnerName]);
+export async function createRunner(
+  projectRoot: string = process.cwd(),
+  scope: RunnerScope = 'default'
+): Promise<IAiRunner> {
+  const adapterName = await resolveAdapterName(projectRoot, scope);
+  return new CliRunner(ADAPTER_DEFINITIONS[adapterName]);
 }
 
 async function buildContextPrompt(files: string[], prompt: string): Promise<string> {
@@ -113,7 +160,38 @@ async function buildContextPrompt(files: string[], prompt: string): Promise<stri
   return prompt;
 }
 
-async function loadRunnerName(projectRoot: string): Promise<RunnerName> {
+async function resolveAdapterName(projectRoot: string, scope: RunnerScope): Promise<AdapterName> {
+  const loadedConfig = await loadRunnerConfig(projectRoot);
+  if (!loadedConfig) {
+    return 'codex';
+  }
+
+  const { config, configPath } = loadedConfig;
+  const adapterFromRouting = resolveAdapterFromRouting(config, scope, configPath);
+  if (adapterFromRouting) {
+    return adapterFromRouting;
+  }
+
+  const rawRunner = config.runner?.toLowerCase().trim();
+  if (rawRunner) {
+    const legacyAdapter = LEGACY_RUNNER_ALIASES[rawRunner];
+    if (!legacyAdapter) {
+      throw new Error(
+        `Unsupported runner "${config.runner}" in ${configPath}. Supported legacy values: ${Object.keys(
+          LEGACY_RUNNER_ALIASES
+        ).join(', ')}`
+      );
+    }
+
+    return legacyAdapter;
+  }
+
+  return 'codex';
+}
+
+async function loadRunnerConfig(
+  projectRoot: string
+): Promise<{ config: RunnerConfig; configPath: string } | undefined> {
   const configPaths = [
     path.join(projectRoot, '.phasegate', 'phasegate.config.json'),
     path.join(projectRoot, 'phasegate.config.json'),
@@ -123,20 +201,84 @@ async function loadRunnerName(projectRoot: string): Promise<RunnerName> {
     if (!(await fse.pathExists(configPath))) continue;
 
     const config = (await fse.readJson(configPath)) as RunnerConfig;
-    const rawRunner = config.runner?.toLowerCase().trim();
-    if (!rawRunner) continue;
-
-    const resolvedRunner = RUNNER_ALIASES[rawRunner];
-    if (!resolvedRunner) {
-      throw new Error(
-        `Unsupported runner "${config.runner}" in ${configPath}. Supported values: ${Object.keys(RUNNER_DEFINITIONS).join(', ')}`
-      );
-    }
-
-    return resolvedRunner;
+    return { config, configPath };
   }
 
-  return 'claude';
+  return undefined;
+}
+
+function resolveAdapterFromRouting(
+  config: RunnerConfig,
+  scope: RunnerScope,
+  configPath: string
+): AdapterName | undefined {
+  const routing = config.aiRouting;
+  const profiles = config.aiProfiles;
+  if (!routing && !profiles) {
+    return undefined;
+  }
+
+  if (!routing || !profiles) {
+    throw new Error(
+      `Invalid AI routing config in ${configPath}. "aiProfiles" and "aiRouting" must be configured together.`
+    );
+  }
+
+  const profileName = routing[scope] ?? routing['default'];
+  if (!profileName) {
+    return undefined;
+  }
+
+  const profile = profiles[profileName];
+  if (!profile) {
+    throw new Error(
+      `Invalid AI routing config in ${configPath}. Route "${scope}" points to missing profile "${profileName}".`
+    );
+  }
+
+  const rawAdapter = profile.adapter?.toLowerCase().trim();
+  if (!rawAdapter) {
+    throw new Error(
+      `Invalid AI routing config in ${configPath}. Profile "${profileName}" must define an "adapter".`
+    );
+  }
+
+  if (!isAdapterName(rawAdapter)) {
+    throw new Error(
+      `Unsupported adapter "${profile.adapter}" in ${configPath}. Supported adapters: ${Object.keys(
+        ADAPTER_DEFINITIONS
+      ).join(', ')}`
+    );
+  }
+
+  return rawAdapter;
+}
+
+function isAdapterName(value: string): value is AdapterName {
+  return value in ADAPTER_DEFINITIONS;
+}
+
+async function buildCodexChatPrompt(
+  systemPrompt: string,
+  systemPromptFile?: string,
+  initialMessage?: string
+): Promise<string> {
+  const parts: string[] = [];
+
+  if (systemPromptFile && (await fse.pathExists(systemPromptFile))) {
+    const filePrompt = (await fse.readFile(systemPromptFile, 'utf-8')).trim();
+    if (filePrompt) parts.push(filePrompt);
+  }
+
+  const inlinePrompt = systemPrompt.trim();
+  if (inlinePrompt) parts.push(inlinePrompt);
+
+  const kickoffMessage = initialMessage?.trim();
+  if (kickoffMessage) {
+    parts.push(['Start the session with this first user-facing message:', kickoffMessage].join('\n'));
+  }
+
+  return parts.join('\n\n');
 }
 
 function spawnCli(command: string, args: string[], stdinContent?: string): Promise<string> {
@@ -198,7 +340,7 @@ function spawnCliInteractive(command: string, args: string[]): Promise<void> {
 
 function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['--output-format', 'stream-json', '--print'], {
+    const proc = spawn('claude', ['--output-format', 'stream-json', '--verbose', '--print'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
       windowsHide: true,
@@ -212,6 +354,7 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
     let buffer = '';
     let resultText = '';
     let stderr = '';
+    let sawResult = false;
 
     const processStreamLine = (line: string): void => {
       const trimmed = line.trim();
@@ -245,6 +388,7 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
           onEvent(event);
         }
       } else if (obj['type'] === 'result') {
+        sawResult = true;
         const resultEvent: ResultEvent = { type: 'result' };
         const usage = obj['usage'];
         if (usage && typeof usage === 'object') {
@@ -271,6 +415,11 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
 
     proc.on('close', (code) => {
       if (code !== 0) {
+        if (sawResult) {
+          processStreamLine(buffer);
+          resolve(resultText);
+          return;
+        }
         reject(new Error(`claude exited with code ${code}\n${stderr}`));
         return;
       }

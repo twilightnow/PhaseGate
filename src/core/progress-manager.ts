@@ -61,22 +61,22 @@ const L10N: Record<string, L10n> = {
   },
   ja: {
     phaseNames: {
-      0: '要件定義',
-      1: 'デザイン生成',
-      2: 'デザインレビュー',
+      0: '要件整理',
+      1: '設計生成',
+      2: '設計レビュー',
       3: '並行モジュール開発',
       4: 'コードレビュー',
       5: '受入',
     },
     title: 'プロジェクト進捗',
-    notice: 'このファイルは PhaseGate によって管理されています。ステータスセクションを手動編集しないでください。',
+    notice: 'このファイルは PhaseGate によって管理されています。ステータス区間を手動編集しないでください。',
     lastUpdated: '最終更新',
     currentPhase: '## 現在のフェーズ',
     requirements: '## 要件',
     design: '## 設計',
     modules: '### モジュール',
     contracts: '### インターフェース契約',
-    designReviewPassed: 'デザインレビュー通過',
+    designReviewPassed: '設計レビュー通過',
     moduleDevelopment: '## モジュール開発',
     codeReview: '## コードレビュー',
     codeReviewPassed: 'コードレビュー通過',
@@ -116,7 +116,7 @@ const L10N: Record<string, L10n> = {
 };
 
 function getL10n(locale?: string): L10n {
-  return L10N[locale ?? 'zh'] ?? L10N['zh'];
+  return L10N[locale ?? 'zh'] ?? L10N.zh;
 }
 
 export interface IProgressManager {
@@ -133,16 +133,14 @@ export class ProgressManager implements IProgressManager {
   read(cwd: string): ProjectProgress {
     const jsonPath = path.join(cwd, PROGRESS_JSON);
     if (!fse.existsSync(jsonPath)) {
-      throw new Error(
-        `progress.json not found in ${cwd}. Run 'phasegate init' first.`
-      );
+      throw new Error(`progress.json not found in ${cwd}. Run 'phasegate init' first.`);
     }
     return fse.readJsonSync(jsonPath) as ProjectProgress;
   }
 
   write(cwd: string, progress: ProjectProgress): void {
     fse.writeJsonSync(path.join(cwd, PROGRESS_JSON), progress, { spaces: 2 });
-    this._syncMdStatus(cwd, progress);
+    this.syncMdStatus(cwd, progress);
   }
 
   updatePhase(cwd: string, phase: PhaseId): void {
@@ -193,16 +191,14 @@ export class ProgressManager implements IProgressManager {
     }
     const existing = fse.readFileSync(mdPath, 'utf-8');
     const progress = this.read(cwd);
-    const l = getL10n(progress.locale);
-    const block = `\n${l.phaseSummaryHeading(phase)}\n\n${summary}\n`;
+    const l10n = getL10n(progress.locale);
+    const block = `\n${l10n.phaseSummaryHeading(phase)}\n\n${summary}\n`;
     fse.writeFileSync(mdPath, existing + block, 'utf-8');
   }
 
-  private _syncMdStatus(cwd: string, progress: ProjectProgress): void {
+  private syncMdStatus(cwd: string, progress: ProjectProgress): void {
     const mdPath = path.join(cwd, PROGRESS_MD);
-    const existing = fse.existsSync(mdPath)
-      ? fse.readFileSync(mdPath, 'utf-8')
-      : '';
+    const existing = fse.existsSync(mdPath) ? fse.readFileSync(mdPath, 'utf-8') : '';
 
     const summaryIdx = existing.indexOf(SUMMARY_SECTION_START);
     const summaryTail =
@@ -210,38 +206,38 @@ export class ProgressManager implements IProgressManager {
         ? '\n' + existing.slice(summaryIdx)
         : `\n${SUMMARY_SECTION_START}\n${SUMMARY_SECTION_NOTE}\n`;
 
-    const statusBody = this._buildStatusSection(progress);
+    const statusBody = this.buildStatusSection(progress);
     const newContent = STATUS_SECTION_START + '\n\n' + statusBody + summaryTail;
 
     fse.writeFileSync(mdPath, newContent, 'utf-8');
   }
 
-  private _buildStatusSection(progress: ProjectProgress): string {
-    const l = getL10n(progress.locale);
+  private buildStatusSection(progress: ProjectProgress): string {
+    const l10n = getL10n(progress.locale);
     const lines: string[] = [];
-    const phaseName = l.phaseNames[progress.currentPhase];
+    const phaseName = l10n.phaseNames[progress.currentPhase];
     const today = new Date().toISOString().split('T')[0];
 
-    lines.push(`# ${progress.projectName} ${l.title}`);
+    lines.push(`# ${progress.projectName} ${l10n.title}`);
     lines.push('');
-    lines.push(`> ${l.notice}`);
+    lines.push(`> ${l10n.notice}`);
     lines.push('');
-    lines.push(`${l.lastUpdated}: ${today}`);
+    lines.push(`${l10n.lastUpdated}: ${today}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push(l.currentPhase);
+    lines.push(l10n.currentPhase);
     lines.push('');
     lines.push(`Phase ${progress.currentPhase}: ${phaseName}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push(l.requirements);
+    lines.push(l10n.requirements);
     lines.push('');
     if (progress.requirements.length === 0) {
-      lines.push(l.notStarted);
+      lines.push(l10n.notStarted);
     } else {
       for (const req of progress.requirements) {
         const tick = req.status === 'done' ? 'x' : ' ';
@@ -252,13 +248,13 @@ export class ProgressManager implements IProgressManager {
     lines.push('---');
     lines.push('');
 
-    lines.push(l.design);
+    lines.push(l10n.design);
     lines.push('');
     if (progress.design.modules.length === 0) {
-      lines.push(l.filledAfterPhase1);
+      lines.push(l10n.filledAfterPhase1);
       lines.push('');
     } else {
-      lines.push(l.modules);
+      lines.push(l10n.modules);
       lines.push('');
       for (const mod of progress.design.modules) {
         const tick = mod.status === 'done' ? 'x' : ' ';
@@ -266,38 +262,36 @@ export class ProgressManager implements IProgressManager {
       }
       lines.push('');
     }
+
     if (progress.design.contracts.length > 0) {
-      lines.push(l.contracts);
+      lines.push(l10n.contracts);
       lines.push('');
       lines.push('| Contract | Status | Provider | Consumers |');
       lines.push('|---|---|---|---|');
-      for (const c of progress.design.contracts) {
+      for (const contract of progress.design.contracts) {
         lines.push(
-          `| ${c.name} | ${c.status} | ${c.provider} | ${c.consumers.join(', ')} |`
+          `| ${contract.name} | ${contract.status} | ${contract.provider} | ${contract.consumers.join(', ')} |`
         );
       }
       lines.push('');
     }
+
     const reviewTick = progress.design.reviewPassed ? 'x' : ' ';
-    lines.push(`- [${reviewTick}] ${l.designReviewPassed}`);
+    lines.push(`- [${reviewTick}] ${l10n.designReviewPassed}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push(l.moduleDevelopment);
+    lines.push(l10n.moduleDevelopment);
     lines.push('');
     if (progress.modules.length === 0) {
-      lines.push(l.filledAfterPhase1);
+      lines.push(l10n.filledAfterPhase1);
     } else {
       for (const mod of progress.modules) {
         const tick = mod.status === 'done' ? 'x' : ' ';
         const statusNote =
-          mod.status !== 'pending' && mod.status !== 'done'
-            ? ` - ${mod.status}`
-            : '';
-        const blockedNote = mod.blockedBy
-          ? ` (blocked by ${mod.blockedBy})`
-          : '';
+          mod.status !== 'pending' && mod.status !== 'done' ? ` - ${mod.status}` : '';
+        const blockedNote = mod.blockedBy ? ` (blocked by ${mod.blockedBy})` : '';
         lines.push(`- [${tick}] ${mod.name}${statusNote}${blockedNote}`);
       }
     }
@@ -305,21 +299,21 @@ export class ProgressManager implements IProgressManager {
     lines.push('---');
     lines.push('');
 
-    lines.push(l.codeReview);
+    lines.push(l10n.codeReview);
     lines.push('');
     const codeReviewTick = progress.codeReviewPassed ? 'x' : ' ';
-    lines.push(`- [${codeReviewTick}] ${l.codeReviewPassed}`);
+    lines.push(`- [${codeReviewTick}] ${l10n.codeReviewPassed}`);
     lines.push('');
     lines.push('---');
     lines.push('');
 
-    lines.push(l.blockers);
+    lines.push(l10n.blockers);
     lines.push('');
     if (progress.blockers.length === 0) {
-      lines.push(l.none);
+      lines.push(l10n.none);
     } else {
-      for (const b of progress.blockers) {
-        lines.push(`- ${b}`);
+      for (const blocker of progress.blockers) {
+        lines.push(`- ${blocker}`);
       }
     }
     lines.push('');

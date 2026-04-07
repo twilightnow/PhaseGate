@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">11.53% </span>
+                <span class="strong">11.76% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>6/52</span>
+                <span class='fraction'>6/51</span>
             </div>
         
             
@@ -167,9 +167,7 @@
 <a name='L102'></a><a href='#L102'>102</a>
 <a name='L103'></a><a href='#L103'>103</a>
 <a name='L104'></a><a href='#L104'>104</a>
-<a name='L105'></a><a href='#L105'>105</a>
-<a name='L106'></a><a href='#L106'>106</a>
-<a name='L107'></a><a href='#L107'>107</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L105'></a><a href='#L105'>105</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -189,11 +187,15 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -211,6 +213,9 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -233,18 +238,13 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -253,12 +253,8 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -294,19 +290,23 @@ export function <span class="fstat-no" title="function not covered" >detectLocal
     const locale = <span class="cstat-no" title="statement not covered" >Intl.DateTimeFormat().resolvedOptions().locale;</span>
     const lang = <span class="cstat-no" title="statement not covered" >locale.split('-')[0].toLowerCase();</span>
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (lang in LOCALE_SECTIONS) <span class="cstat-no" title="statement not covered" >return lang;</span></span>
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
+&nbsp;
   const envLang = <span class="cstat-no" title="statement not covered" >process.env.LANG || process.env.LANGUAGE || process.env.LC_ALL || '';</span>
   const match = <span class="cstat-no" title="statement not covered" >envLang.match(/^([a-z]{2})/i);</span>
 <span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (match) {</span>
     const lang = <span class="cstat-no" title="statement not covered" >match[1].toLowerCase();</span>
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (lang in LOCALE_SECTIONS) <span class="cstat-no" title="statement not covered" >return lang;</span></span>
   }
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  return 'zh';</span>
 }
 &nbsp;
 export function <span class="fstat-no" title="function not covered" >getRequiredSections(</span>locale?: string): string[] {
   const lang = <span class="cstat-no" title="statement not covered" >locale ?? detectLocale();</span>
-<span class="cstat-no" title="statement not covered" >  return LOCALE_SECTIONS[lang] ?? LOCALE_SECTIONS['zh'];</span>
+<span class="cstat-no" title="statement not covered" >  return LOCALE_SECTIONS[lang] ?? LOCALE_SECTIONS.zh;</span>
 }
 &nbsp;
 async function <span class="fstat-no" title="function not covered" >loadRequiredSections(</span>cwd: string): Promise&lt;string[]&gt; {
@@ -316,12 +316,15 @@ async function <span class="fstat-no" title="function not covered" >loadRequired
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (Array.isArray(config.phase0Sections) &amp;&amp; config.phase0Sections.length &gt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >      return config.phase0Sections;</span>
     }
-  } catch { /* config missing or unreadable — use locale default */ }
+  } catch {
+    /* config missing or unreadable; use locale default */
+  }
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  return getRequiredSections();</span>
 }
 &nbsp;
 /**
- * Gate check for Phase 0 → Phase 1 transition.
+ * Gate check for Phase 0 -&gt; Phase 1 transition.
  * Verifies that at least one requirements file (not the init template) exists
  * and contains the required sections.
  * Section names are auto-detected from system locale, or overridden via
@@ -339,36 +342,27 @@ export async function <span class="fstat-no" title="function not covered" >check
 <span class="cstat-no" title="statement not covered" >    return { passed: false, issues };</span>
   }
 &nbsp;
-  // Exclude the blank init template; AI-generated files have feature-specific names
   const mdFiles = <span class="cstat-no" title="statement not covered" >files.filter(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; <span class="cstat-no" title="statement not covered" >f.endsWith('.md') &amp;&amp; f !== 'requirements.md')</span>;</span>
-&nbsp;
 <span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (mdFiles.length === 0) {</span>
-<span class="cstat-no" title="statement not covered" >    issues.push(</span>
-      'No requirements file found — expected .phasegate/requirements/{feature-name}.md'
-    );
+<span class="cstat-no" title="statement not covered" >    issues.push('No requirements file found; expected .phasegate/requirements/{feature-name}.md');</span>
 <span class="cstat-no" title="statement not covered" >    return { passed: false, issues };</span>
   }
 &nbsp;
   const fallbackSections = <span class="cstat-no" title="statement not covered" >await loadRequiredSections(cwd);</span>
-  // All known section sets (built-in locales + any config override)
   const allSectionSets = <span class="cstat-no" title="statement not covered" >Object.values(LOCALE_SECTIONS);</span>
-<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (!allSectionSets.some(<span class="fstat-no" title="function not covered" >(s</span>) =&gt; <span class="cstat-no" title="statement not covered" >s === fallbackSections)</span>) {</span>
+<span class="cstat-no" title="statement not covered" >  <span class="missing-if-branch" title="if path not taken" >I</span>if (!allSectionSets.some(<span class="fstat-no" title="function not covered" >(s</span>ections) =&gt; <span class="cstat-no" title="statement not covered" >sections === fallbackSections)</span>) {</span>
 <span class="cstat-no" title="statement not covered" >    allSectionSets.push(fallbackSections);</span>
   }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  for (const file of mdFiles) {</span>
     const content = <span class="cstat-no" title="statement not covered" >await fse.readFile(path.join(reqDir, file), 'utf-8');</span>
 &nbsp;
-    // Pass if the file satisfies ANY locale's complete section set
-    const satisfied = <span class="cstat-no" title="statement not covered" >allSectionSets.some(<span class="fstat-no" title="function not covered" >(s</span>ections) =&gt;</span>
-<span class="cstat-no" title="statement not covered" >      sections.every(<span class="fstat-no" title="function not covered" >(s</span>) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(s))</span></span>
-    );
+    const satisfied = <span class="cstat-no" title="statement not covered" >allSectionSets.some(<span class="fstat-no" title="function not covered" >(s</span>ections) =&gt; <span class="cstat-no" title="statement not covered" >sections.every(<span class="fstat-no" title="function not covered" >(s</span>ection) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(section))</span>)</span>;</span>
 <span class="cstat-no" title="statement not covered" >    <span class="missing-if-branch" title="if path not taken" >I</span>if (satisfied) <span class="cstat-no" title="statement not covered" >continue;</span></span>
 &nbsp;
-    // Report missing sections from the best-matching set (most sections present)
     const bestSet = <span class="cstat-no" title="statement not covered" >allSectionSets.reduce(<span class="fstat-no" title="function not covered" >(b</span>est, sections) =&gt; {</span>
-      const matches = <span class="cstat-no" title="statement not covered" >sections.filter(<span class="fstat-no" title="function not covered" >(s</span>) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(s))</span>.length;</span>
-      const bestMatches = <span class="cstat-no" title="statement not covered" >best.filter(<span class="fstat-no" title="function not covered" >(s</span>) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(s))</span>.length;</span>
+      const matches = <span class="cstat-no" title="statement not covered" >sections.filter(<span class="fstat-no" title="function not covered" >(s</span>ection) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(section))</span>.length;</span>
+      const bestMatches = <span class="cstat-no" title="statement not covered" >best.filter(<span class="fstat-no" title="function not covered" >(s</span>ection) =&gt; <span class="cstat-no" title="statement not covered" >content.includes(section))</span>.length;</span>
 <span class="cstat-no" title="statement not covered" >      return matches &gt; bestMatches ? sections : best;</span>
     }, fallbackSections);
 &nbsp;
@@ -388,7 +382,7 @@ export async function <span class="fstat-no" title="function not covered" >check
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-07T09:33:19.011Z
+                at 2026-04-07T12:50:40.124Z
             </div>
         <script src="prettify.js"></script>
         <script>

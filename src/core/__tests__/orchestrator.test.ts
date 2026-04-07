@@ -62,12 +62,19 @@ describe('Orchestrator', () => {
       'utf-8'
     );
 
-    const runner: IAiRunner = {
+    const coordinatorRunner: IAiRunner = {
+      run: jest.fn().mockResolvedValue('## Execution Order\n- module-a'),
+      fork: jest.fn(),
+      chat: jest.fn(),
+    };
+    const workerRunner: IAiRunner = {
       run: jest.fn(),
       fork: jest.fn(() => new Promise(() => undefined)),
       chat: jest.fn(),
     };
-    mockCreateRunner.mockResolvedValue(runner);
+    mockCreateRunner
+      .mockResolvedValueOnce(coordinatorRunner)
+      .mockResolvedValueOnce(workerRunner);
 
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     const orchestrator = new Orchestrator();
@@ -75,6 +82,8 @@ describe('Orchestrator', () => {
 
     expect(result.status).toBe('failed');
     expect(result.error).toContain('worker timeout after 25ms');
+    expect(mockCreateRunner).toHaveBeenNthCalledWith(1, projectRoot, 'phase3.coordinator');
+    expect(mockCreateRunner).toHaveBeenNthCalledWith(2, projectRoot, 'phase3.worker');
     expect(logSpy).toHaveBeenCalledWith('Wave 1/1: module-a');
     expect(
       logSpy.mock.calls.some(([line]) => String(line).includes('module-a started'))
@@ -92,6 +101,12 @@ describe('Orchestrator', () => {
     const progress = await fse.readJson(path.join(projectRoot, '.phasegate', 'progress.json'));
     expect(progress.modules).toContainEqual({ name: 'module-a', status: 'failed' });
     expect(progress.blockers).toContain('[module-a] worker timeout after 25ms');
+    expect(
+      await fse.readFile(
+        path.join(projectRoot, '.phasegate', 'scratchpad', 'coordinator', 'brief.md'),
+        'utf-8'
+      )
+    ).toContain('## Execution Order');
   });
 
   it('passes only the module design file and relevant contracts to each worker', async () => {
@@ -141,7 +156,12 @@ consumers:
       'utf-8'
     );
 
-    const runner: IAiRunner = {
+    const coordinatorRunner: IAiRunner = {
+      run: jest.fn().mockResolvedValue('## Execution Order\n- run-display'),
+      fork: jest.fn(),
+      chat: jest.fn(),
+    };
+    const workerRunner: IAiRunner = {
       run: jest.fn(),
       fork: jest.fn().mockResolvedValue({
         scope: 'run-display - display streaming progress',
@@ -152,15 +172,19 @@ consumers:
       }),
       chat: jest.fn(),
     };
-    mockCreateRunner.mockResolvedValue(runner);
+    mockCreateRunner
+      .mockResolvedValueOnce(coordinatorRunner)
+      .mockResolvedValueOnce(workerRunner);
 
     const orchestrator = new Orchestrator();
     const [result] = await orchestrator.run(projectRoot);
 
     expect(result.status).toBe('done');
-    expect(runner.fork).toHaveBeenCalledTimes(1);
+    expect(mockCreateRunner).toHaveBeenNthCalledWith(1, projectRoot, 'phase3.coordinator');
+    expect(mockCreateRunner).toHaveBeenNthCalledWith(2, projectRoot, 'phase3.worker');
+    expect(workerRunner.fork).toHaveBeenCalledTimes(1);
 
-    const [contextFiles] = (runner.fork as jest.Mock).mock.calls[0];
+    const [contextFiles] = (workerRunner.fork as jest.Mock).mock.calls[0];
     expect(contextFiles).toContain(
       path.join(projectRoot, '.phasegate', 'tasks', 'run-display.md')
     );
@@ -170,5 +194,11 @@ consumers:
     expect(contextFiles).not.toContain(
       path.join(projectRoot, '.phasegate', 'contracts', 'IUnused.md')
     );
+    expect(
+      await fse.readFile(
+        path.join(projectRoot, '.phasegate', 'scratchpad', 'coordinator', 'brief.md'),
+        'utf-8'
+      )
+    ).toContain('## Execution Order');
   });
 });

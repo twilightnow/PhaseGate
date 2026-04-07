@@ -48,6 +48,8 @@
 - [`core/architecture-constraints.md`](./core/architecture-constraints.md)
   - 当前实现真正生效的架构边界。
 - [`core/cli-surface.md`](./core/cli-surface.md)
+- [`core/ai-routing.md`](./core/ai-routing.md)
+  - 按担当范围选择 AI provider 的配置设计与回退规则。
   - CLI 命令面、输入输出、内部调用链。
 - [`guides/getting-started.md`](./guides/getting-started.md)
   - 安装、初始化、典型使用流程。

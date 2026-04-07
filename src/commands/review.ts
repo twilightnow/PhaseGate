@@ -60,7 +60,7 @@ export function createReviewCommand(): Command {
       console.log(chalk.cyan('->') + ` Reviewing ${moduleName} (independent context)...`);
 
       try {
-        const runner = await createRunner(cwd);
+        const runner = await createRunner(cwd, 'phase4');
         const result = await runner.run(files, prompt);
         console.log('');
         console.log(result);

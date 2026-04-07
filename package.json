@@ -11,13 +11,13 @@
     "prompts"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "jest",
-    "test:unit": "jest",
+    "test": "node ./node_modules/jest/bin/jest.js --runInBand",
+    "test:unit": "node ./node_modules/jest/bin/jest.js --runInBand",
     "test:live": "tsx scripts/test-live-runner.ts",
-    "test:coverage": "jest --coverage",
+    "test:coverage": "node ./node_modules/jest/bin/jest.js --runInBand --coverage",
     "acceptance:phase2": "tsx scripts/acceptance-phase2.ts"
   },
   "dependencies": {

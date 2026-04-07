@@ -143,6 +143,12 @@ Code review passed. All done-module implementations conform to their design book
 - {any known technical debt or edge cases the acceptance reviewer should probe}
 ```
 
+This summary append is mandatory:
+- You must open `.phasegate/progress.md` and append the block with the exact heading `## Phase 4 Summary`
+- Do not use alternative headings such as `### Phase 4`, `Phase Four Summary`, or localized variants
+- Do not stop after printing the summary in the terminal; the summary must exist inside `.phasegate/progress.md`
+- If `## Phase 4 Summary` is missing from `.phasegate/progress.md`, the task is incomplete
+
 ---
 
 ## Gate Check (confirm before ending session)

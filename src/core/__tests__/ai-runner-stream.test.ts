@@ -21,6 +21,7 @@ jest.mock('fs-extra', () => ({
 
 import { CliRunner } from '../ai-runner';
 import type { RunEvent } from '../../types';
+import * as fse from 'fs-extra';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,12 +79,41 @@ function geminiRunner(): CliRunner {
   });
 }
 
+function codexRunner(): CliRunner {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new (CliRunner as any)({
+    command: 'codex',
+    buildRunArgs: () => [
+      'exec',
+      '-c',
+      'approvals_reviewer="user"',
+      '-c',
+      'windows.sandbox="unelevated"',
+      '--skip-git-repo-check',
+      '-s',
+      'workspace-write',
+      '-',
+    ],
+    useStdinForPrompt: true,
+    buildChatArgs: (systemPrompt: string) => [
+      '-c',
+      'approvals_reviewer="user"',
+      '-c',
+      'windows.sandbox="unelevated"',
+      '-s',
+      'workspace-write',
+      ...(systemPrompt ? [systemPrompt] : []),
+    ],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
   mockSpawn.mockReset();
+  jest.clearAllMocks();
 });
 
 // 1. onEvent absent → existing spawnCli path, no streaming
@@ -245,6 +275,7 @@ describe('run() with onEvent, Claude runner', () => {
     const [, args] = mockSpawn.mock.calls[0];
     expect(args).toContain('--output-format');
     expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
   });
 
   it('returns empty string when result field is absent', async () => {
@@ -273,6 +304,22 @@ describe('run() with onEvent, Claude runner', () => {
 
     await expect(resultPromise).rejects.toThrow('exited with code 1');
   });
+
+  it('returns the result when the process exits non-zero after emitting a result event', async () => {
+    const proc = makeFakeProc();
+    mockSpawn.mockReturnValue(proc);
+
+    const runner = claudeRunner();
+    const resultPromise = runner.run([], 'task', () => {});
+
+    setImmediate(() => {
+      proc.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', result: 'completed anyway' }) + '\n'));
+      proc.stderr.emit('data', Buffer.from('late non-fatal error'));
+      proc.emit('close', 1);
+    });
+
+    await expect(resultPromise).resolves.toBe('completed anyway');
+  });
 });
 
 // 3. onEvent present, Gemini/Codex runner → silent degradation
@@ -299,6 +346,75 @@ describe('run() with onEvent, non-Claude runner', () => {
     // Should NOT have used stream-json flag
     const [, args] = mockSpawn.mock.calls[0];
     expect(args).not.toContain('stream-json');
+  });
+
+  it('ignores onEvent and uses stdin-based exec mode for Codex', async () => {
+    const proc = makeFakeProc();
+    const stdinWrite = jest.spyOn(proc.stdin, 'write');
+    const stdinEnd = jest.spyOn(proc.stdin, 'end');
+    mockSpawn.mockReturnValue(proc);
+
+    const events: RunEvent[] = [];
+    const runner = codexRunner();
+    const resultPromise = runner.run([], 'multi\nline\nprompt', (e) => events.push(e));
+
+    setImmediate(() => {
+      proc.stdout.emit('data', Buffer.from('codex output'));
+      proc.emit('close', 0);
+    });
+
+    const result = await resultPromise;
+    expect(result).toBe('codex output');
+    expect(events).toHaveLength(0);
+
+    const [command, args] = mockSpawn.mock.calls[0];
+    expect(command).toBe('codex');
+    expect(args).toEqual([
+      'exec',
+      '-c',
+      'approvals_reviewer="user"',
+      '-c',
+      'windows.sandbox="unelevated"',
+      '--skip-git-repo-check',
+      '-s',
+      'workspace-write',
+      '-',
+    ]);
+    expect(stdinWrite).toHaveBeenCalledWith('multi\nline\nprompt');
+    expect(stdinEnd).toHaveBeenCalled();
+  });
+});
+
+describe('chat() runner-specific behaviour', () => {
+  it('passes Codex a single startup prompt composed from file, inline prompt, and initial message', async () => {
+    const proc = makeFakeProc();
+    mockSpawn.mockReturnValue(proc);
+
+    const mockedPathExists = fse.pathExists as unknown as jest.Mock;
+    const mockedReadFile = fse.readFile as unknown as jest.Mock;
+    mockedPathExists.mockResolvedValue(true);
+    mockedReadFile.mockResolvedValue('SYSTEM FILE CONTENT');
+
+    const runner = codexRunner();
+    const chatPromise = runner.chat('INLINE PROMPT', 'prompt.md', 'Hello from PhaseGate');
+
+    setImmediate(() => {
+      proc.emit('close', 0);
+    });
+
+    await chatPromise;
+
+    const [command, args] = mockSpawn.mock.calls[0];
+    expect(command).toBe('codex');
+    expect(args).toEqual([
+      '-c',
+      'approvals_reviewer="user"',
+      '-c',
+      'windows.sandbox="unelevated"',
+      '-s',
+      'workspace-write',
+      'SYSTEM FILE CONTENT\n\nINLINE PROMPT\n\nStart the session with this first user-facing message:\nHello from PhaseGate',
+    ]);
   });
 });
 

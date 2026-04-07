@@ -14,8 +14,8 @@ const PROMPT_FILE_BY_LOCALE: Record<string, string> = {
 };
 
 const INITIAL_MESSAGE_BY_LOCALE: Record<string, string> = {
-  zh: '你好！请开始 Phase 0 需求讨论，先问我要开发什么功能。',
-  ja: 'こんにちは！Phase 0 の要件討議を始めましょう。どんな機能を作りたいですか？',
+  zh: '你好！我们开始 Phase 0 需求讨论吧。你想开发什么功能？',
+  ja: 'こんにちは。Phase 0 の要件整理を始めましょう。どんな機能を作りたいですか？',
 };
 
 function getPhase0PromptFile(): string {
@@ -28,7 +28,7 @@ function getInitialMessage(): string {
   const locale = detectLocale();
   return (
     INITIAL_MESSAGE_BY_LOCALE[locale] ??
-    'Hello! Let\'s start the Phase 0 requirements discussion. What feature would you like to build?'
+    "Hello! Let's start the Phase 0 requirements discussion. What feature would you like to build?"
   );
 }
 
@@ -56,8 +56,6 @@ export function createChatCommand(): Command {
       const promptFileExists = await fse.pathExists(promptFile);
       const systemPromptFile = promptFileExists ? promptFile : undefined;
 
-      // Inline prompt: only used when the file is absent (fallback) or to append feature info.
-      // Kept short so it is safe to pass as a shell argument on all platforms.
       let inlinePrompt = '';
       if (!promptFileExists) {
         inlinePrompt = 'You are facilitating a PhaseGate requirements discussion session.';
@@ -71,17 +69,13 @@ export function createChatCommand(): Command {
       console.log('');
 
       try {
-        const runner = await createRunner(cwd);
+        const runner = await createRunner(cwd, 'chat');
         await runner.chat(inlinePrompt, systemPromptFile, getInitialMessage());
       } catch (err) {
-        console.error(
-          chalk.red('Chat error:'),
-          err instanceof Error ? err.message : err
-        );
+        console.error(chalk.red('Chat error:'), err instanceof Error ? err.message : err);
         process.exit(1);
       }
 
-      // Subprocess exited — Gate check runs automatically
       console.log('');
       console.log(chalk.cyan('->') + ' Session ended. Running Phase 0 Gate check...');
 
@@ -100,8 +94,8 @@ export function createChatCommand(): Command {
       const pm = new ProgressManager();
       pm.updatePhase(cwd, 1);
 
-      console.log(chalk.green('✓') + ' Gate passed.');
-      console.log(chalk.green('✓') + ' Phase advanced to 1 (Design Generation).');
+      console.log(chalk.green('OK') + ' Gate passed.');
+      console.log(chalk.green('OK') + ' Phase advanced to 1 (Design Generation).');
       console.log('Run ' + chalk.bold('phasegate run') + ' to start Phase 1.');
     });
 
