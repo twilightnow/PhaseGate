@@ -1,58 +1,121 @@
-
 # PhaseGate
 
-一套工程化的 AI 全自动编码流程工具。通过阶段隔离 context、契约先行、Fork Worker 编排，让 AI 产出可维护、有架构的代码。
+Engineering-first AI coding workflow with phase isolation, contract-first design, and orchestrated multi-module implementation.
 
-## 核心理念
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
 
-- **按阶段隔离 context** — 每个阶段完成后清零，避免 context 累积导致质量下降
-- **文件即记忆** — 任务书、接口契约、进度文档承载跨阶段信息，AI 每次只读它需要的部分
-- **Phase Summary 传递** — 每个阶段产出结构化 Summary，下一阶段只加载 Summary 作为 context 锚点
-- **契约先行** — 先定接口，再写实现，支持模块并行开发
-- **自动阶段推进** — Phase 0 结束后统一由 `phasegate run` 读取 `currentPhase` 自动串行推进；默认路径下会在同一 CLI 会话内连续执行 Phase 1-5，直到 gate 失败或到达终态
-- **Fork Worker 编排** — Phase 3 由 Coordinator Agent 自动调度：构建依赖 DAG → 按 wave 并发 fork 模块 worker → 断点续跑
-- **双重 review** — 自我 review + 独立 AI review，避免确认偏误
-- **自动验收** — AI 先跑完能自动验证的部分，再出人工验收指导书，发现 bug 自动触发自修正循环
+## What It Is
 
-## 工作流
+PhaseGate turns AI coding into a staged workflow with two separate tracks:
 
+- a requirements track where requirement docs can keep accumulating
+- an execution track where one selected requirement is turned into design, implementation, review, and acceptance artifacts
+
+It is for teams or individuals who want repeatable, inspectable AI-assisted delivery. It is not for one-shot prompt coding.
+
+What makes it different from many AI coding tools:
+
+- requirement intake is separated from active execution instead of forcing one global conversation state
+- phase boundaries reset context instead of carrying one long conversation
+- task books and contracts become explicit files, not hidden agent memory
+- multi-module work is coordinated from a dependency DAG, not just parallel prompts
+- progress is persisted on disk so the workflow can resume after interruption
+
+## Quick Start
+
+Important: the invoked AI tool must run with full-access permissions. Restricted sandbox mode can block the workflow or produce incomplete results.
+
+Requirements:
+
+- Node.js 18+
+- npm
+- an installed AI CLI adapter: `codex` or `claude`
+
+Run locally:
+
+```bash
+npm install
+npm run build
+node dist/index.js init
+node dist/index.js chat --feature login
+node dist/index.js run
 ```
-Phase 0: 需求讨论  →  Phase 1: 任务书生成  →  Phase 2: 任务书 review
-                                                      ↓
-Phase 5: 验收      ←  Phase 4: 代码 review  ←  Phase 3: 模块并行开发
+
+During `init`, PhaseGate will ask which default AI adapter to use: `Claude Code` or `Codex`.
+If you want to skip the prompt in automation, use:
+
+```bash
+node dist/index.js init --adapter codex
+node dist/index.js init --adapter claude-code
 ```
 
-设计约定：
+After initialization, you can change the default adapter or routing in `.phasegate/phasegate.config.json` under the `.phasegate/` folder.
 
-- `phasegate chat` 只负责 Phase 0 需求讨论
-- 从 Phase 1 开始，统一由 `phasegate run` 按 `progress.json.currentPhase` 自动推进后续阶段
-- 未显式指定 `--phase` 时，`phasegate run` 会在同一进程内循环执行：执行当前 phase → 通过 gate → 写回 `progress.json` / `progress.md` → 重新从磁盘构建下一 phase 的上下文 → 继续
-- `phasegate run --phase N` 只执行指定 phase，但仍会在 gate 通过时写回下一阶段状态
-- 人工介入只用于异常处理、验收判断或显式 override，不应成为常规推进方式
-- Phase 3 内部保留断点续跑能力；中断后重新执行 `phasegate run` 时会从 `progress.json` 的最新状态继续
+## Workspace
 
-Phase 3 内部由 Coordinator Agent 全自动编排，无需人工介入：
-
-```
-Coordinator
-    ├── fork → module-A（独立子进程，注入设计书 + 相关契约）
-    ├── fork → module-B
-    └── fork → module-C
+```text
+.phasegate/
+  requirements/
+  tasks/
+  contracts/
+  scratchpad/
+  archive/
+  progress.json
+  phasegate.config.json
 ```
 
-## 文档
+`requirements/` is intended to behave like a requirement pool, not a single in-flight phase folder.
+`tasks/` and `contracts/` are active execution artifacts for the currently selected requirement.
+`scratchpad/` is for disposable run output such as coordinator briefs, worker reports, and temporary notes.
+`archive/` is for promoted historical artifacts worth keeping after a run finishes.
 
-| 文档 | 内容 |
-|---|---|
-| [docs/00_overview.md](docs/00_overview.md) | 总纲：背景、定位、核心原则 |
-| [docs/01_workflow_phases.md](docs/01_workflow_phases.md) | 工作流各阶段详细设计 |
-| [docs/02_progress_document.md](docs/02_progress_document.md) | 进度文档规范（progress.json + progress.md） |
-| [docs/03_architecture_constraints.md](docs/03_architecture_constraints.md) | 架构约束（硬规则）|
-| [docs/04_product_roadmap.md](docs/04_product_roadmap.md) | 产品形态分阶段规划 |
-| [docs/05_cli_design.md](docs/05_cli_design.md) | CLI 模块设计（接口、依赖、build order）|
+`progress.json` is the only source of truth for execution state.
 
-## 当前状态
+## Workflow Direction
 
-版本 0.1 — Phase 2（CLI 工具开发）Step 1。
+The intended operating model is:
 
-基础设施（package.json、tsconfig、入口、全局类型）已完成，`phasegate init` 命令开发中。
+- requirements can be added, revised, and approved independently of the current execution phase
+- `phasegate run` should operate on one manually selected requirement at a time
+- execution does not need parallel requirement handling yet; selection and sequencing can stay explicit
+- once a requirement is selected for execution, PhaseGate generates the task / contract / review artifacts for that requirement only
+- one-off documents should stay in `scratchpad/` by default and only move to `archive/` if they have future audit or reuse value
+
+Current direction:
+
+- treat `.phasegate/requirements/*.md` as an appendable backlog of approved or candidate requirements
+- keep an explicit `activeRequirement` in `progress.json`
+- scope `currentPhase` to the active requirement execution flow rather than to the entire workspace
+- keep summaries and disposable artifacts under `scratchpad/` instead of maintaining a derived `progress.md`
+- avoid treating generated task books, coordinator briefs, and worker reports as permanent documentation unless they are deliberately promoted
+
+## Status
+
+Implemented now:
+
+- `init`, `chat`, `run`, `status`, `progress`, `review`
+- explicit `select` command for choosing the active requirement
+- scope-based AI routing
+- Phase 3 coordinator / worker orchestration
+- progress persistence and resume from disk
+
+Planned next:
+
+- clarify lifecycle rules for disposable documents versus archived artifacts
+- add a new phase that generates and maintains a high-level design document after implementation changes
+- make automated implementation stages more parallel across tasks and modules
+- support for more AI APIs and adapters
+
+## Limits
+
+- Output quality still depends on prompt, task-book, and contract quality
+- Review and acceptance still need human judgment
+- The current adapter surface is limited to `codex` and `claude-code`
+
+## Docs
+
+- Start here: [docs/guides/getting-started.md](docs/guides/getting-started.md)
+- CLI surface: [docs/core/cli-surface.md](docs/core/cli-surface.md)
+- Workflow phases: [docs/core/workflow-phases.md](docs/core/workflow-phases.md)
+- Workspace layout: [docs/guides/workspace-layout.md](docs/guides/workspace-layout.md)
+- Full docs index: [docs/README.md](docs/README.md)

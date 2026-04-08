@@ -1,34 +1,45 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import { getRequiredSections } from './phase-gate';
 import type { ProjectProgress } from '../types';
+import { readAcceptanceCriteria } from './progress-report';
 
 type WorkerReportSnapshot = {
   keyFiles: string[];
   issues: string[];
 };
 
+function getSummaryDir(cwd: string): string {
+  return path.join(cwd, '.phasegate', 'scratchpad', 'summaries');
+}
+
+function ensureSummaryDir(cwd: string): string {
+  const dir = getSummaryDir(cwd);
+  fse.ensureDirSync(dir);
+  return dir;
+}
+
+function formatArchiveSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
 export class PhaseArtifactBuilder {
   appendPhase3Summary(cwd: string, progress: ProjectProgress): void {
-    const progressMdPath = path.join(cwd, '.phasegate', 'progress.md');
-    if (!fse.existsSync(progressMdPath)) {
-      return;
-    }
-
-    const existing = fse.readFileSync(progressMdPath, 'utf-8');
-    if (existing.includes('## Phase 3 Summary')) {
-      return;
-    }
+    const summaryPath = path.join(ensureSummaryDir(cwd), 'phase-3-summary.md');
 
     const done = progress.modules.filter((entry) => entry.status === 'done');
     const failed = progress.modules.filter((entry) => entry.status === 'failed');
     const blocked = progress.modules.filter((entry) => entry.status === 'blocked');
 
     const lines = [
+      '# Phase 3 Summary',
       '',
-      '## Phase 3 Summary',
+      `Active requirement: ${progress.activeRequirement ?? '(none)'}`,
       '',
-      '### Current State',
+      '## Current State',
       done.length > 0
         ? `Completed modules: ${done.map((entry) => entry.name).join(', ')}`
         : 'Completed modules: none',
@@ -39,32 +50,17 @@ export class PhaseArtifactBuilder {
         ? `Blocked modules: ${blocked.map(formatModuleReason).join('; ')}`
         : 'Blocked modules: none',
       '',
-      '### Outputs',
+      '## Outputs',
       '- .phasegate/scratchpad/: worker reports updated for all attempted modules',
       '- progress.json: module runtime statuses synchronized from orchestrator results',
       '',
-      '### Notes for Phase 4',
-      '- Review only modules listed as done in this summary.',
-      failed.length > 0 || blocked.length > 0
-        ? '- Use the failed/blocked reasons below to explain skipped modules.'
-        : '- No failed or blocked modules were reported by Phase 3.',
-      '',
     ];
 
-    fse.writeFileSync(progressMdPath, existing + lines.join('\n'), 'utf-8');
+    fse.writeFileSync(summaryPath, lines.join('\n'), 'utf-8');
   }
 
   appendPhase4Summary(cwd: string, progress: ProjectProgress): void {
-    const progressMdPath = path.join(cwd, '.phasegate', 'progress.md');
-    if (!fse.existsSync(progressMdPath)) {
-      return;
-    }
-
-    const existing = fse.readFileSync(progressMdPath, 'utf-8');
-    if (existing.includes('## Phase 4 Summary')) {
-      return;
-    }
-
+    const summaryPath = path.join(ensureSummaryDir(cwd), 'phase-4-summary.md');
     const done = progress.modules.filter((entry) => entry.status === 'done');
     const skipped = progress.modules.filter(
       (entry) => entry.status === 'failed' || entry.status === 'blocked'
@@ -72,15 +68,16 @@ export class PhaseArtifactBuilder {
     const reports = this.readWorkerReports(cwd, done.map((entry) => entry.name));
 
     const lines = [
+      '# Phase 4 Summary',
       '',
-      '## Phase 4 Summary',
+      `Active requirement: ${progress.activeRequirement ?? '(none)'}`,
       '',
-      '### Current State',
+      '## Current State',
       done.length > 0
         ? 'Code review completed for all done modules.'
         : 'No done modules were available for code review.',
       '',
-      '### Coverage',
+      '## Coverage',
       done.length > 0
         ? done
             .map((entry) => {
@@ -91,33 +88,30 @@ export class PhaseArtifactBuilder {
             .join('\n')
         : '- none',
       '',
-      '### Issues Fixed',
+      '## Issues Fixed',
       buildIssueSummary(reports, done.map((entry) => entry.name)),
       '',
-      '### Remaining Non-P0 Issues',
+      '## Remaining Non-P0 Issues',
       '- none recorded in automation summary',
       '',
-      '### Modules Skipped (not reviewed)',
+      '## Modules Skipped',
       skipped.length > 0
         ? skipped.map((entry) => `- ${entry.name}: ${entry.status}`).join('\n')
         : '- none',
       '',
-      '### Notes for Phase 5',
-      '- Re-run targeted acceptance checks for any modules changed during Phase 4.',
-      '- Confirm user-facing behavior for modules reviewed in this phase.',
-      '',
     ];
 
-    fse.writeFileSync(progressMdPath, existing + lines.join('\n'), 'utf-8');
+    fse.writeFileSync(summaryPath, lines.join('\n'), 'utf-8');
+  }
+
+  writePhase4ReviewOutput(cwd: string, output: string): void {
+    const outputPath = path.join(ensureSummaryDir(cwd), 'phase-4-review-output.md');
+    fse.writeFileSync(outputPath, output, 'utf-8');
   }
 
   ensureAcceptanceGuide(cwd: string, progress: ProjectProgress): void {
     const guidePath = path.join(cwd, 'acceptance-guide.md');
-    if (fse.existsSync(guidePath)) {
-      return;
-    }
-
-    const requirements = this.readAcceptanceCriteria(cwd);
+    const requirements = this.getAcceptanceCriteria(cwd, progress);
     const doneModules = progress.modules.filter((entry) => entry.status === 'done');
     const blockedModules = progress.modules.filter(
       (entry) => entry.status === 'failed' || entry.status === 'blocked'
@@ -128,7 +122,7 @@ export class PhaseArtifactBuilder {
       `# ${progress.projectName} Acceptance Guide`,
       '',
       `Generated: ${today}`,
-      'Phase: 5B - Human Verification',
+      `Requirement: ${progress.activeRequirement ?? '(none)'}`,
       '',
       '## AI Auto-Verification Summary',
       `- [x] Phase 5 automation completed for ${doneModules.length} done module(s)`,
@@ -139,9 +133,9 @@ export class PhaseArtifactBuilder {
     ];
 
     if (requirements.length === 0) {
-      lines.push('1. No explicit acceptance criteria were parsed from requirements.');
+      lines.push('1. No explicit acceptance criteria were parsed from the active requirement.');
       lines.push('How to verify: Review the implemented workflow manually.');
-      lines.push('Expected result: The workflow behaves as described in the requirements files.');
+      lines.push('Expected result: The workflow behaves as described in the requirement file.');
       lines.push('Pass condition: A human confirms the delivered behavior matches expectations.');
       lines.push('');
     } else {
@@ -173,87 +167,94 @@ export class PhaseArtifactBuilder {
     fse.writeFileSync(guidePath, lines.join('\n'), 'utf-8');
   }
 
-  appendPhase5Summary(cwd: string, progress: ProjectProgress): void {
-    const progressMdPath = path.join(cwd, '.phasegate', 'progress.md');
-    if (!fse.existsSync(progressMdPath)) {
-      return;
-    }
-
-    const existing = fse.readFileSync(progressMdPath, 'utf-8');
-    if (existing.includes('## Phase 5 Summary')) {
-      return;
-    }
-
-    const requirements = this.readAcceptanceCriteria(cwd);
+  appendPhase5Summary(
+    cwd: string,
+    progress: ProjectProgress,
+    outcome: 'done' | 'blocked' = 'done'
+  ): void {
+    const summaryPath = path.join(ensureSummaryDir(cwd), 'phase-5-summary.md');
+    const requirements = this.getAcceptanceCriteria(cwd, progress);
     const doneModules = progress.modules.filter((entry) => entry.status === 'done');
     const blockedModules = progress.modules.filter(
       (entry) => entry.status === 'failed' || entry.status === 'blocked'
     );
 
     const lines = [
+      '# Phase 5 Summary',
       '',
-      '## Phase 5 Summary',
+      `Active requirement: ${progress.activeRequirement ?? '(none)'}`,
       '',
-      '### Current State',
-      'PHASE_DONE',
+      '## Current State',
+      outcome === 'done' ? 'PHASE_DONE' : 'PHASE_BLOCKED',
       '',
-      '### Auto-Verification',
+      '## Auto-Verification',
       `Passed: ${requirements.length} acceptance criteria recorded for follow-up in acceptance-guide.md`,
       `Skipped: ${blockedModules.length} module-related items`,
       'Escalated: 0 criteria',
       '',
-      '### Human Verification',
+      '## Human Verification',
       doneModules.length > 0
         ? `Pending manual confirmation for ${doneModules.length} implemented module(s) via acceptance-guide.md.`
         : 'Pending manual confirmation via acceptance-guide.md.',
       '',
-      '### Known Limitations',
+      '## Known Limitations',
       blockedModules.length > 0
         ? blockedModules.map((entry) => `- ${entry.name}: ${entry.status}`).join('\n')
         : '- none',
       '',
     ];
 
-    fse.writeFileSync(progressMdPath, existing + lines.join('\n'), 'utf-8');
+    fse.writeFileSync(summaryPath, lines.join('\n'), 'utf-8');
   }
 
-  private readAcceptanceCriteria(cwd: string): string[] {
-    const requirementsDir = path.join(cwd, '.phasegate', 'requirements');
-    if (!fse.existsSync(requirementsDir)) {
-      return [];
+  finalizeExecutionArtifacts(cwd: string, progress: ProjectProgress): string | null {
+    if (!progress.activeRequirement) {
+      return null;
     }
 
-    const files = fse
-      .readdirSync(requirementsDir)
-      .filter((file) => file.endsWith('.md') && file !== 'requirements.md')
-      .map((file) => path.join(requirementsDir, file));
-
-    const acceptanceHeadings = Array.from(
-      new Set([
-        'Acceptance Criteria',
-        getRequiredSections('en')[2],
-        getRequiredSections('zh')[2],
-        getRequiredSections('ja')[2],
-      ])
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const archiveDir = path.join(
+      cwd,
+      '.phasegate',
+      'archive',
+      `${formatArchiveSegment(progress.activeRequirement)}-${timestamp}`
     );
 
-    const items: string[] = [];
-    for (const file of files) {
-      const content = fse.readFileSync(file, 'utf-8');
-      const section = acceptanceHeadings
-        .map((heading) => extractMarkdownSection(content, heading))
-        .find(Boolean);
-      if (!section) continue;
+    const entriesToMove: Array<{ from: string; to: string }> = [
+      { from: path.join(cwd, '.phasegate', 'tasks'), to: path.join(archiveDir, 'tasks') },
+      { from: path.join(cwd, '.phasegate', 'contracts'), to: path.join(archiveDir, 'contracts') },
+      { from: path.join(cwd, '.phasegate', 'scratchpad'), to: path.join(archiveDir, 'scratchpad') },
+    ];
 
-      for (const line of section.split('\n')) {
-        const match = line.match(/^- \[[ xX]\]\s+(.+)$/);
-        if (match) {
-          items.push(match[1].trim());
-        }
+    let movedAny = false;
+    for (const entry of entriesToMove) {
+      if (!fse.existsSync(entry.from)) {
+        continue;
       }
+
+      const names = fse.readdirSync(entry.from);
+      if (names.length === 0) {
+        continue;
+      }
+
+      fse.ensureDirSync(path.dirname(entry.to));
+      fse.moveSync(entry.from, entry.to, { overwrite: true });
+      fse.ensureDirSync(entry.from);
+      movedAny = true;
     }
 
-    return items;
+    const acceptanceGuidePath = path.join(cwd, 'acceptance-guide.md');
+    if (fse.existsSync(acceptanceGuidePath)) {
+      fse.ensureDirSync(archiveDir);
+      fse.copyFileSync(acceptanceGuidePath, path.join(archiveDir, 'acceptance-guide.md'));
+      movedAny = true;
+    }
+
+    return movedAny ? archiveDir : null;
+  }
+
+  getAcceptanceCriteria(cwd: string, progress: ProjectProgress): string[] {
+    return readAcceptanceCriteria(cwd, progress);
   }
 
   private readWorkerReports(cwd: string, moduleNames: string[]): Record<string, WorkerReportSnapshot> {
@@ -278,12 +279,6 @@ export class PhaseArtifactBuilder {
 
     return reports;
   }
-}
-
-function extractMarkdownSection(content: string, heading: string): string {
-  const regex = new RegExp(`##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, 'i');
-  const match = content.match(regex);
-  return match ? match[1].trim() : '';
 }
 
 function buildIssueSummary(

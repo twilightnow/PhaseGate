@@ -2,9 +2,8 @@ import * as path from 'path';
 import * as fse from 'fs-extra';
 import { ProgressManager } from './progress-manager';
 import { PhaseArtifactBuilder } from './phase-artifact-builder';
-import type { ContractEntry, ProjectProgress } from '../types';
+import type { ContractEntry } from '../types';
 import type {
-  ExecutablePhaseId,
   PhaseExecutionResult,
   PhaseTransitionResult,
 } from './phase-runtime';
@@ -28,17 +27,9 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
       case 3:
         return this.resolvePhase3(cwd, result);
       case 4:
-        return this.resolvePhase4(cwd);
+        return this.resolvePhase4WithResult(cwd, result.output);
       case 5:
-        this.artifacts.ensureAcceptanceGuide(cwd, this.pm.read(cwd));
-        this.artifacts.appendPhase5Summary(cwd, this.pm.read(cwd));
-        return {
-          phase: 5,
-          nextPhase: null,
-          shouldContinue: false,
-          stopReason: 'terminal',
-          message: '✓ Phase 5 complete. Automation finished.',
-        };
+        return this.resolvePhase5(cwd);
     }
   }
 
@@ -49,7 +40,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
       nextPhase: 2,
       shouldContinue: true,
       stopReason: 'terminal',
-      message: '✓ Phase advanced to 2 (Design Review).',
+      message: 'OK Phase advanced to 2 (Design Review).',
     };
   }
 
@@ -68,7 +59,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
         nextPhase: 3,
         shouldContinue: true,
         stopReason: 'terminal',
-        message: '✓ Phase advanced to 3 (Parallel Module Development).',
+        message: 'OK Phase advanced to 3 (Parallel Module Development).',
       };
     }
 
@@ -103,7 +94,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
         nextPhase: 4,
         shouldContinue: true,
         stopReason: 'terminal',
-        message: '✓ Phase 3 complete. Advancing to Phase 4 (code review).',
+        message: 'OK Phase 3 complete. Advancing to Phase 4 (code review).',
       };
     }
 
@@ -116,10 +107,21 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
     };
   }
 
-  private async resolvePhase4(cwd: string): Promise<PhaseTransitionResult> {
-    this.artifacts.appendPhase4Summary(cwd, this.pm.read(cwd));
-    const passed = await this.checkPhase4Gate(cwd);
+  private async resolvePhase4WithResult(
+    cwd: string,
+    output: string | undefined
+  ): Promise<PhaseTransitionResult> {
+    const verdict = getPhase4Verdict(output);
+    if (output) {
+      this.artifacts.writePhase4ReviewOutput(cwd, output);
+    }
+
     const progress = this.pm.read(cwd);
+    if (verdict === 'pass') {
+      this.artifacts.appendPhase4Summary(cwd, progress);
+    }
+
+    const passed = verdict === 'pass' && (await this.checkPhase4Gate(cwd));
     progress.codeReviewPassed = passed;
     if (passed) {
       progress.currentPhase = 5;
@@ -132,7 +134,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
         nextPhase: 5,
         shouldContinue: true,
         stopReason: 'terminal',
-        message: '✓ Phase advanced to 5 (Acceptance).',
+        message: 'OK Phase advanced to 5 (Acceptance).',
       };
     }
 
@@ -142,7 +144,36 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
       shouldContinue: false,
       stopReason: 'gate_failed',
       message:
-        '! Phase 4 gate not yet passed: Phase 4 Summary not found in progress.md. Re-run when the review session is complete.',
+        '! Phase 4 gate not yet passed: review output did not produce a PASS verdict with a persisted phase-4-summary.md.',
+    };
+  }
+
+  private async resolvePhase5(cwd: string): Promise<PhaseTransitionResult> {
+    const progress = this.pm.read(cwd);
+    const criteria = this.artifacts.getAcceptanceCriteria(cwd, progress);
+    if (criteria.length === 0) {
+      this.artifacts.appendPhase5Summary(cwd, progress, 'blocked');
+      return {
+        phase: 5,
+        nextPhase: null,
+        shouldContinue: false,
+        stopReason: 'gate_failed',
+        message:
+          '! Phase 5 gate failed: acceptance criteria recorded: 0. Add explicit criteria to the active requirement before finalizing.',
+      };
+    }
+
+    this.artifacts.ensureAcceptanceGuide(cwd, progress);
+    this.artifacts.appendPhase5Summary(cwd, progress);
+    this.artifacts.finalizeExecutionArtifacts(cwd, progress);
+    this.pm.completeActiveRequirement(cwd);
+
+    return {
+      phase: 5,
+      nextPhase: null,
+      shouldContinue: false,
+      stopReason: 'terminal',
+      message: 'OK Phase 5 complete. Active execution finalized and archived.',
     };
   }
 
@@ -158,9 +189,9 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
         'No module design files found in .phasegate/tasks/. Ensure the AI generated at least one task file before advancing.'
       );
     }
-    if (contractFiles.length === 0) {
+    if (contractFiles.length === 0 && taskFiles.length > 1) {
       throw new Error(
-        'No contract files found in .phasegate/contracts/. Ensure the AI generated at least one contract file before advancing.'
+        'No contract files found in .phasegate/contracts/. Multi-module designs must declare at least one contract before advancing.'
       );
     }
 
@@ -186,8 +217,9 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
   private async checkPhase2Gate(cwd: string): Promise<boolean> {
     const contractsDir = path.join(cwd, '.phasegate', 'contracts');
     const files = await listMarkdownFiles(contractsDir);
+    const progress = this.pm.read(cwd);
     if (files.length === 0) {
-      return false;
+      return progress.design.modules.length === 1;
     }
 
     for (const file of files) {
@@ -201,14 +233,31 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
   }
 
   private async checkPhase4Gate(cwd: string): Promise<boolean> {
-    const mdPath = path.join(cwd, '.phasegate', 'progress.md');
+    const mdPath = path.join(cwd, '.phasegate', 'scratchpad', 'summaries', 'phase-4-summary.md');
     if (!(await fse.pathExists(mdPath))) {
       return false;
     }
 
     const content = await fse.readFile(mdPath, 'utf-8');
-    return content.includes('## Phase 4 Summary');
+    return content.includes('# Phase 4 Summary');
   }
+}
+
+function getPhase4Verdict(output: string | undefined): 'pass' | 'fail' | 'unknown' {
+  const normalized = output?.trim().toUpperCase() ?? '';
+  if (!normalized) {
+    return 'unknown';
+  }
+
+  if (/\bPASS\b/.test(normalized)) {
+    return 'pass';
+  }
+
+  if (/\bFAIL\b/.test(normalized)) {
+    return 'fail';
+  }
+
+  return 'unknown';
 }
 
 async function listMarkdownFiles(dir: string): Promise<string[]> {
@@ -294,4 +343,3 @@ function extractYamlList(yaml: string, key: string): string[] {
 
   return items;
 }
-

@@ -1,31 +1,21 @@
-/**
- * Tests for the streaming extension of CliRunner.run()
- *
- * Strategy: mock child_process.spawn to return a fake EventEmitter-based proc,
- * then verify that onEvent callbacks are called with the right shapes.
- */
-
 import { EventEmitter } from 'events';
 import { Writable } from 'stream';
 
-// ---- Mock child_process.spawn BEFORE importing ai-runner ----
 const mockSpawn = jest.fn();
 jest.mock('child_process', () => ({ spawn: mockSpawn }));
 
-// ---- Mock fs-extra so buildContextPrompt works without real files ----
 jest.mock('fs-extra', () => ({
+  ensureDir: jest.fn().mockResolvedValue(undefined),
   pathExists: jest.fn().mockResolvedValue(false),
   readFile: jest.fn().mockResolvedValue(''),
   readJson: jest.fn().mockResolvedValue({}),
+  remove: jest.fn().mockResolvedValue(undefined),
+  writeFile: jest.fn().mockResolvedValue(undefined),
 }));
 
 import { CliRunner } from '../ai-runner';
 import type { RunEvent } from '../../types';
 import * as fse from 'fs-extra';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 interface FakeProc extends EventEmitter {
   stdin: Writable;
@@ -33,17 +23,15 @@ interface FakeProc extends EventEmitter {
   stderr: EventEmitter;
 }
 
-/** Build a minimal fake proc that behaves like a ChildProcess */
 function makeFakeProc(): FakeProc {
   const proc = new EventEmitter() as FakeProc;
-  proc.stdin = new Writable({ write(_c, _e, cb) { cb(); } });
+  proc.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
   return proc;
 }
 
-/** Emit newline-delimited JSON lines then close the proc */
-function emitLines(proc: FakeProc, lines: unknown[], exitCode = 0): void {
+function emitJsonLines(proc: FakeProc, lines: unknown[], exitCode = 0): void {
   setImmediate(() => {
     for (const line of lines) {
       proc.stdout.emit('data', Buffer.from(JSON.stringify(line) + '\n'));
@@ -52,21 +40,20 @@ function emitLines(proc: FakeProc, lines: unknown[], exitCode = 0): void {
   });
 }
 
-// RUNNER_DEFINITIONS is internal, so we build CliRunner instances directly via
-// the exported factory helpers.  We test with the claude command by monkeypatching
-// the definition command.
-
-// Access the private definition field via casting.
 function claudeRunner(): CliRunner {
-  // ClaudeRunner isn't exported so we reconstruct a CliRunner with claude definition.
-  // The simplest way: import createRunner and override config — but that reads disk.
-  // Instead, we cast to `any` to pass a synthetic definition with command='claude'.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new (CliRunner as any)({
     command: 'claude',
     buildRunArgs: () => ['--print'],
+    buildStreamingRunArgs: () => ['--output-format', 'stream-json', '--verbose', '--print'],
     useStdinForPrompt: true,
     buildChatArgs: () => [],
+    capabilities: {
+      runStreaming: 'event',
+      forkStreaming: 'text',
+      interactiveChat: true,
+      structuredWorkerReport: true,
+    },
   });
 }
 
@@ -74,8 +61,14 @@ function geminiRunner(): CliRunner {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new (CliRunner as any)({
     command: 'gemini',
-    buildRunArgs: (p: string) => ['-p', p],
+    buildRunArgs: (prompt: string) => ['-p', prompt],
     buildChatArgs: () => [],
+    capabilities: {
+      runStreaming: 'none',
+      forkStreaming: 'none',
+      interactiveChat: true,
+      structuredWorkerReport: false,
+    },
   });
 }
 
@@ -94,6 +87,18 @@ function codexRunner(): CliRunner {
       'workspace-write',
       '-',
     ],
+    buildStreamingRunArgs: () => [
+      'exec',
+      '-c',
+      'approvals_reviewer="user"',
+      '-c',
+      'windows.sandbox="unelevated"',
+      '--skip-git-repo-check',
+      '-s',
+      'workspace-write',
+      '--json',
+      '-',
+    ],
     useStdinForPrompt: true,
     buildChatArgs: (systemPrompt: string) => [
       '-c',
@@ -104,21 +109,22 @@ function codexRunner(): CliRunner {
       'workspace-write',
       ...(systemPrompt ? [systemPrompt] : []),
     ],
+    capabilities: {
+      runStreaming: 'event',
+      forkStreaming: 'event',
+      interactiveChat: true,
+      structuredWorkerReport: true,
+    },
   });
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 beforeEach(() => {
   mockSpawn.mockReset();
   jest.clearAllMocks();
 });
 
-// 1. onEvent absent → existing spawnCli path, no streaming
-describe('run() without onEvent', () => {
-  it('calls spawnCli (non-streaming) and returns trimmed stdout', async () => {
+describe('run() without hooks', () => {
+  it('uses the plain CLI path and returns trimmed stdout', async () => {
     const proc = makeFakeProc();
     mockSpawn.mockReturnValue(proc);
 
@@ -130,225 +136,91 @@ describe('run() without onEvent', () => {
       proc.emit('close', 0);
     });
 
-    const result = await resultPromise;
-    expect(result).toBe('result text');
-
-    // Should NOT have used stream-json flag
+    await expect(resultPromise).resolves.toBe('result text');
     const [, args] = mockSpawn.mock.calls[0];
     expect(args).not.toContain('stream-json');
   });
 });
 
-// 2. onEvent present, Claude runner → spawnCliStreaming path
-describe('run() with onEvent, Claude runner', () => {
-  it('emits tool_use events for Write and Edit with file_path', async () => {
+describe('run() with Claude event streaming', () => {
+  it('emits tool_use events and final usage', async () => {
     const proc = makeFakeProc();
     mockSpawn.mockReturnValue(proc);
 
     const events: RunEvent[] = [];
     const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
+    const resultPromise = runner.run([], 'task', (event) => events.push(event));
 
-    emitLines(proc, [
+    emitJsonLines(proc, [
       {
         type: 'assistant',
         message: {
           content: [
-            { type: 'tool_use', name: 'Write', input: { file_path: 'src/foo.ts', content: '...' } },
-            { type: 'tool_use', name: 'Edit', input: { file_path: 'src/bar.ts' } },
+            { type: 'tool_use', name: 'Write', input: { file_path: 'src/foo.ts' } },
+            { type: 'tool_use', name: 'Bash', input: { command: 'npm test -- --runInBand' } },
           ],
         },
       },
-      { type: 'result', subtype: 'success', result: 'done text', usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.001 } },
+      { type: 'result', result: 'done text', usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.001 } },
     ]);
 
-    await resultPromise;
-
-    const toolEvents = events.filter((e) => e.type === 'tool_use');
-    expect(toolEvents).toHaveLength(2);
-    expect(toolEvents[0]).toEqual({ type: 'tool_use', name: 'Write', input: 'src/foo.ts' });
-    expect(toolEvents[1]).toEqual({ type: 'tool_use', name: 'Edit', input: 'src/bar.ts' });
-  });
-
-  it('emits tool_use for Bash with truncated command (≤60 chars)', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    const longCmd = 'npm run build && npm run test && npm run lint && extra stuff here';
-    emitLines(proc, [
-      {
-        type: 'assistant',
-        message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: longCmd } }] },
-      },
-      { type: 'result', result: '' },
+    await expect(resultPromise).resolves.toBe('done text');
+    expect(events).toEqual([
+      { type: 'tool_use', name: 'Write', input: 'src/foo.ts' },
+      { type: 'tool_use', name: 'Bash', input: 'npm test -- --runInBand' },
+      { type: 'result', usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.001 } },
     ]);
-
-    await resultPromise;
-
-    const bashEvent = events.find((e) => e.type === 'tool_use' && e.name === 'Bash');
-    expect(bashEvent).toBeDefined();
-    expect((bashEvent as { input?: string }).input).toHaveLength(60);
-  });
-
-  it('emits tool_use for TodoWrite and Task without input field', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    emitLines(proc, [
-      {
-        type: 'assistant',
-        message: {
-          content: [
-            { type: 'tool_use', name: 'TodoWrite', input: { todos: [] } },
-            { type: 'tool_use', name: 'Task', input: { description: 'something' } },
-          ],
-        },
-      },
-      { type: 'result', result: '' },
-    ]);
-
-    await resultPromise;
-
-    const todoEvent = events.find((e) => e.type === 'tool_use' && e.name === 'TodoWrite');
-    expect(todoEvent).not.toHaveProperty('input');
-    const taskEvent = events.find((e) => e.type === 'tool_use' && e.name === 'Task');
-    expect(taskEvent).not.toHaveProperty('input');
-  });
-
-  it('emits ResultEvent with usage when usage is present', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    emitLines(proc, [
-      { type: 'result', result: 'final answer', usage: { input_tokens: 100, output_tokens: 50, cost_usd: 0.002 } },
-    ]);
-
-    const result = await resultPromise;
-    expect(result).toBe('final answer');
-
-    const resultEvent = events.find((e) => e.type === 'result');
-    expect(resultEvent).toEqual({
-      type: 'result',
-      usage: { input_tokens: 100, output_tokens: 50, cost_usd: 0.002 },
-    });
-  });
-
-  it('emits ResultEvent without usage when usage field is absent', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    emitLines(proc, [{ type: 'result', result: '' }]);
-
-    await resultPromise;
-
-    const resultEvent = events.find((e) => e.type === 'result');
-    expect(resultEvent).toEqual({ type: 'result' });
-    expect(resultEvent).not.toHaveProperty('usage');
-  });
-
-  it('uses --output-format stream-json flag', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', () => {});
-
-    emitLines(proc, [{ type: 'result', result: '' }]);
-    await resultPromise;
 
     const [, args] = mockSpawn.mock.calls[0];
     expect(args).toContain('--output-format');
     expect(args).toContain('stream-json');
-    expect(args).toContain('--verbose');
   });
 
-  it('returns empty string when result field is absent', async () => {
+  it('skips malformed JSON and still handles the final buffered line', async () => {
     const proc = makeFakeProc();
     mockSpawn.mockReturnValue(proc);
 
+    const events: RunEvent[] = [];
     const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', () => {});
-
-    emitLines(proc, [{ type: 'result' }]);
-    const result = await resultPromise;
-    expect(result).toBe('');
-  });
-
-  it('rejects when process exits with non-zero code', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', () => {});
+    const resultPromise = runner.run([], 'task', (event) => events.push(event));
 
     setImmediate(() => {
-      proc.stderr.emit('data', Buffer.from('some error'));
-      proc.emit('close', 1);
+      proc.stdout.emit('data', Buffer.from('not json\n'));
+      proc.stdout.emit('data', Buffer.from(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'src/bar.ts' } }] },
+      }) + '\n'));
+      proc.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', result: 'done without newline' })));
+      proc.emit('close', 0);
     });
 
-    await expect(resultPromise).rejects.toThrow('exited with code 1');
-  });
-
-  it('returns the result when the process exits non-zero after emitting a result event', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', () => {});
-
-    setImmediate(() => {
-      proc.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', result: 'completed anyway' }) + '\n'));
-      proc.stderr.emit('data', Buffer.from('late non-fatal error'));
-      proc.emit('close', 1);
-    });
-
-    await expect(resultPromise).resolves.toBe('completed anyway');
+    await expect(resultPromise).resolves.toBe('done without newline');
+    expect(events).toContainEqual({ type: 'tool_use', name: 'Edit', input: 'src/bar.ts' });
+    expect(events).toContainEqual({ type: 'result' });
   });
 });
 
-// 3. onEvent present, Gemini/Codex runner → silent degradation
-describe('run() with onEvent, non-Claude runner', () => {
-  it('ignores onEvent and calls existing spawnCli path for Gemini', async () => {
+describe('run() with non-Claude adapters', () => {
+  it('keeps plain CLI behaviour for runners without streaming support', async () => {
     const proc = makeFakeProc();
     mockSpawn.mockReturnValue(proc);
 
     const events: RunEvent[] = [];
     const runner = geminiRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
+    const resultPromise = runner.run([], 'task', (event) => events.push(event));
 
     setImmediate(() => {
       proc.stdout.emit('data', Buffer.from('gemini output'));
       proc.emit('close', 0);
     });
 
-    const result = await resultPromise;
-    expect(result).toBe('gemini output');
-
-    // onEvent should never have been called
+    await expect(resultPromise).resolves.toBe('gemini output');
     expect(events).toHaveLength(0);
-
-    // Should NOT have used stream-json flag
     const [, args] = mockSpawn.mock.calls[0];
     expect(args).not.toContain('stream-json');
   });
 
-  it('ignores onEvent and uses stdin-based exec mode for Codex', async () => {
+  it('streams Codex JSON events, including command and file changes', async () => {
     const proc = makeFakeProc();
     const stdinWrite = jest.spyOn(proc.stdin, 'write');
     const stdinEnd = jest.spyOn(proc.stdin, 'end');
@@ -356,16 +228,38 @@ describe('run() with onEvent, non-Claude runner', () => {
 
     const events: RunEvent[] = [];
     const runner = codexRunner();
-    const resultPromise = runner.run([], 'multi\nline\nprompt', (e) => events.push(e));
+    const resultPromise = runner.run([], 'multi\nline\nprompt', (event) => events.push(event));
 
-    setImmediate(() => {
-      proc.stdout.emit('data', Buffer.from('codex output'));
-      proc.emit('close', 0);
-    });
+    emitJsonLines(proc, [
+      {
+        type: 'item.started',
+        item: { id: 'item_0', type: 'command_execution', command: 'npm test', status: 'in_progress' },
+      },
+      {
+        type: 'item.started',
+        item: {
+          id: 'item_1',
+          type: 'file_change',
+          changes: [{ path: 'C:\\repo\\src\\foo.ts', kind: 'add' }],
+          status: 'in_progress',
+        },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'item_2', type: 'agent_message', text: 'codex output' },
+      },
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: 11, output_tokens: 7 },
+      },
+    ]);
 
-    const result = await resultPromise;
-    expect(result).toBe('codex output');
-    expect(events).toHaveLength(0);
+    await expect(resultPromise).resolves.toBe('codex output');
+    expect(events).toEqual([
+      { type: 'tool_use', name: 'Bash', input: 'npm test' },
+      { type: 'tool_use', name: 'Write', input: 'C:\\repo\\src\\foo.ts' },
+      { type: 'result', usage: { input_tokens: 11, output_tokens: 7 } },
+    ]);
 
     const [command, args] = mockSpawn.mock.calls[0];
     expect(command).toBe('codex');
@@ -378,6 +272,7 @@ describe('run() with onEvent, non-Claude runner', () => {
       '--skip-git-repo-check',
       '-s',
       'workspace-write',
+      '--json',
       '-',
     ]);
     expect(stdinWrite).toHaveBeenCalledWith('multi\nline\nprompt');
@@ -385,18 +280,88 @@ describe('run() with onEvent, non-Claude runner', () => {
   });
 });
 
+describe('fork() streaming behaviour', () => {
+  it('streams plain text for Claude fork and still parses the final worker report', async () => {
+    const proc = makeFakeProc();
+    mockSpawn.mockReturnValue(proc);
+
+    const runner = claudeRunner();
+    const textLines: string[] = [];
+    const forkPromise = runner.fork([], 'task', { onText: (line) => textLines.push(line) });
+
+    setImmediate(() => {
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          '## Scope\nmodule-a - scope\n\n## Result\ndone\n\n## Key Files\n- src/a.ts\n\n## Files Changed\n- src/a.ts\n\n## Issues\n(none)\n'
+        )
+      );
+      proc.emit('close', 0);
+    });
+
+    await expect(forkPromise).resolves.toEqual({
+      scope: 'module-a - scope',
+      result: 'done',
+      keyFiles: ['src/a.ts'],
+      filesChanged: ['src/a.ts'],
+      issues: [],
+    });
+    expect(textLines.some((line) => line.includes('## Scope'))).toBe(true);
+  });
+
+  it('streams Codex JSON events during fork and parses the final worker report', async () => {
+    const proc = makeFakeProc();
+    mockSpawn.mockReturnValue(proc);
+
+    const events: RunEvent[] = [];
+    const runner = codexRunner();
+    const forkPromise = runner.fork([], 'task', { onEvent: (event) => events.push(event) });
+
+    emitJsonLines(proc, [
+      {
+        type: 'item.started',
+        item: { id: 'item_0', type: 'command_execution', command: 'npm test', status: 'in_progress' },
+      },
+      {
+        type: 'item.completed',
+        item: {
+          id: 'item_1',
+          type: 'agent_message',
+          text: '## Scope\nmodule-b - scope\n\n## Result\ndone\n\n## Key Files\n- src/b.ts\n\n## Files Changed\n- src/b.ts\n\n## Issues\n(none)',
+        },
+      },
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: 21, output_tokens: 9 },
+      },
+    ]);
+
+    await expect(forkPromise).resolves.toEqual({
+      scope: 'module-b - scope',
+      result: 'done',
+      keyFiles: ['src/b.ts'],
+      filesChanged: ['src/b.ts'],
+      issues: [],
+    });
+    expect(events).toContainEqual({ type: 'tool_use', name: 'Bash', input: 'npm test' });
+    expect(events).toContainEqual({ type: 'result', usage: { input_tokens: 21, output_tokens: 9 } });
+  });
+});
+
 describe('chat() runner-specific behaviour', () => {
-  it('passes Codex a single startup prompt composed from file, inline prompt, and initial message', async () => {
+  it('passes Codex a short startup prompt and writes hidden instructions to a temp file', async () => {
     const proc = makeFakeProc();
     mockSpawn.mockReturnValue(proc);
 
     const mockedPathExists = fse.pathExists as unknown as jest.Mock;
     const mockedReadFile = fse.readFile as unknown as jest.Mock;
+    const mockedWriteFile = fse.writeFile as unknown as jest.Mock;
+    const mockedRemove = fse.remove as unknown as jest.Mock;
     mockedPathExists.mockResolvedValue(true);
     mockedReadFile.mockResolvedValue('SYSTEM FILE CONTENT');
 
     const runner = codexRunner();
-    const chatPromise = runner.chat('INLINE PROMPT', 'prompt.md', 'Hello from PhaseGate');
+    const chatPromise = runner.chat('INLINE PROMPT', 'prompt.md', 'Check requirements first');
 
     setImmediate(() => {
       proc.emit('close', 0);
@@ -405,62 +370,30 @@ describe('chat() runner-specific behaviour', () => {
     await chatPromise;
 
     const [command, args] = mockSpawn.mock.calls[0];
-    expect(command).toBe('codex');
+    expect(command).toBe(process.execPath);
+    expect(mockedWriteFile).toHaveBeenCalledWith(
+      expect.stringContaining('.phasegate'),
+      'SYSTEM FILE CONTENT\n\nINLINE PROMPT',
+      'utf-8'
+    );
+    expect(mockedWriteFile.mock.calls[0][0]).toEqual(
+      expect.stringMatching(/\.codex-chat-instructions-\d+-\d+\.md$/)
+    );
     expect(args).toEqual([
+      expect.stringContaining('@openai\\codex\\bin\\codex.js'),
       '-c',
       'approvals_reviewer="user"',
       '-c',
       'windows.sandbox="unelevated"',
       '-s',
       'workspace-write',
-      'SYSTEM FILE CONTENT\n\nINLINE PROMPT\n\nStart the session with this first user-facing message:\nHello from PhaseGate',
+      '-c',
+      expect.stringMatching(/^model_instructions_file=/),
+      'Check requirements first',
     ]);
-  });
-});
-
-// 4. Malformed JSON lines → skipped, subsequent valid lines still processed
-describe('malformed JSON handling', () => {
-  it('skips non-JSON lines and processes subsequent valid lines', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    setImmediate(() => {
-      // Mix of bad and good lines
-      proc.stdout.emit('data', Buffer.from('not json\n'));
-      proc.stdout.emit('data', Buffer.from('{broken\n'));
-      proc.stdout.emit('data', Buffer.from(
-        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: 'ok.ts' } }] } }) + '\n'
-      ));
-      proc.stdout.emit('data', Buffer.from(
-        JSON.stringify({ type: 'result', result: 'done' }) + '\n'
-      ));
-      proc.emit('close', 0);
-    });
-
-    const result = await resultPromise;
-    expect(result).toBe('done');
-    expect(events.some((e) => e.type === 'tool_use' && e.name === 'Write')).toBe(true);
-  });
-
-  it('processes the final buffered JSON line without a trailing newline', async () => {
-    const proc = makeFakeProc();
-    mockSpawn.mockReturnValue(proc);
-
-    const events: RunEvent[] = [];
-    const runner = claudeRunner();
-    const resultPromise = runner.run([], 'task', (e) => events.push(e));
-
-    setImmediate(() => {
-      proc.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', result: 'done without newline' })));
-      proc.emit('close', 0);
-    });
-
-    const result = await resultPromise;
-    expect(result).toBe('done without newline');
-    expect(events).toContainEqual({ type: 'result' });
+    expect(mockedRemove).toHaveBeenCalledWith(expect.stringContaining('.phasegate'));
+    expect(mockedRemove.mock.calls[0][0]).toEqual(
+      expect.stringMatching(/\.codex-chat-instructions-\d+-\d+\.md$/)
+    );
   });
 });

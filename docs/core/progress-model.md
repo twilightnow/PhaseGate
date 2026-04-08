@@ -3,47 +3,28 @@
 - Type: core
 - Status: active
 - Reader: both
-- Use when: 需要理解 `progress.json`、`progress.md` 以及状态推进字段时
-- Source of truth: 是
-- Update when: `ProjectProgress` 类型、状态机字段或进度同步方式变化时
+- Use when: you need to understand persisted execution state
+- Source of truth: current implementation
 
 ## Purpose
 
-定义 PhaseGate 的进度数据模型，以及机器状态与阅读视图之间的边界。
+PhaseGate separates requirement accumulation from active execution.
+The backlog lives in `.phasegate/requirements/`.
+Execution state lives only in `.phasegate/progress.json`.
 
-## Scope
+## Authoritative State
 
-包含：`progress.json`、`progress.md`、核心字段、状态更新规则。
+`progress.json` is the only authoritative state file.
+There is no generated `progress.md` in the current model.
 
-不包含：Phase prompt 细节、模块任务文档格式全文。
-
-## Key Facts / Decisions / Constraints
-
-- `progress.json` 是唯一状态写入源。
-- `progress.md` 仅用于人类和 AI 阅读，不应作为状态写入入口。
-- 所有命令和 orchestrator 都以 `progress.json` 为准。
-- `ProgressManager.write()` 负责把 `progress.json` 投影为 `progress.md`。
-
-## Type Summary
-
-类型定义来自 `src/types.ts`：
-
-```ts
-type PhaseId = 0 | 1 | 2 | 3 | 4 | 5;
-type ItemStatus = 'pending' | 'done' | 'blocked' | 'failed';
-type ModuleRunStatus = 'pending' | 'running' | 'done' | 'failed' | 'blocked';
-type ContractStatus = 'draft' | 'finalized';
-```
-
-## `progress.json`
-
-核心结构：
+Key fields:
 
 ```json
 {
-  "projectName": "PhaseGate",
-  "locale": "zh",
+  "projectName": "demo",
+  "locale": "en",
   "currentPhase": 0,
+  "activeRequirement": null,
   "requirements": [],
   "design": {
     "modules": [],
@@ -56,37 +37,35 @@ type ContractStatus = 'draft' | 'finalized';
 }
 ```
 
-字段边界：
+## Semantics
 
-- `requirements`
-  - Phase 0 / 1 相关的需求项状态
-- `design.modules`
-  - Phase 1 产出的模块级设计状态
-- `design.contracts`
-  - 契约清单及 `draft/finalized` 状态
+- `activeRequirement`
+  - The single requirement currently bound to execution.
+  - `null` means execution is idle.
+- `currentPhase`
+  - Execution-local phase for the active requirement.
+  - `0` means no active execution.
+- `requirements[]`
+  - Backlog entries discovered from `.phasegate/requirements/*.md`.
+  - Status values: `draft`, `approved`, `selected`, `implemented`, `archived`.
+- `design`
+  - Phase 1 and Phase 2 outputs for the active requirement.
 - `modules`
-  - Phase 3 运行时模块状态，允许 `running`
+  - Runtime module state used during Phase 3 orchestration.
 - `codeReviewPassed`
-  - Phase 4 gate 结果
+  - Phase 4 gate result.
 - `blockers`
-  - 全局阻塞信息
+  - Known blocking runtime issues.
 
-## `progress.md`
+## Lifecycle Rules
 
-定位：
-
-- 面向人类和 AI 的摘要视图
-- 默认由 PhaseGate 自动重写
-- 可包含阶段总结区块，但不应被视为机器真相
-
-当前约束：
-
-- Phase 3 完成后，系统会尝试追加 `## Phase 3 Summary`
-- Phase 4 gate 通过依赖 `progress.md` 中存在 `## Phase 4 Summary`
+- `phasegate chat` can add or revise requirement docs without starting execution.
+- `phasegate select <requirement>` marks one approved requirement as active.
+- `phasegate run` executes only the selected requirement.
+- Completing Phase 5 finalizes artifacts, marks the active requirement `implemented`, and resets execution to idle.
 
 ## Related
 
-- [`workflow-phases.md`](./workflow-phases.md)
-- [`../guides/workspace-layout.md`](../guides/workspace-layout.md)
-- `src/types.ts`
-- `src/core/progress-manager.ts`
+- [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)
+- [workspace-layout.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/workspace-layout.md)
+- [progress-manager.ts](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/src/core/progress-manager.ts)

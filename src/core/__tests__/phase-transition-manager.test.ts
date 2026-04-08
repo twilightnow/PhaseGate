@@ -17,7 +17,8 @@ describe('PhaseTransitionManager', () => {
     const progress: ProjectProgress = {
       projectName: 'ptm-test',
       currentPhase: 2,
-      requirements: [],
+      activeRequirement: 'feature',
+      requirements: [{ name: 'feature', file: 'feature.md', status: 'selected' }],
       design: {
         modules: [{ name: 'demo', status: 'done' }],
         contracts: [],
@@ -116,6 +117,18 @@ type DemoContract = {
     expect(syncedProgress.design.contracts[0]?.provider).toBe('demo-provider');
   });
 
+  it('allows single-module phase 1 output without contracts', async () => {
+    await fse.remove(path.join(projectRoot, '.phasegate', 'contracts', 'DemoContract.md'));
+
+    const transition = await new PhaseTransitionManager().resolve(projectRoot, { phase: 1 });
+    const progress = new ProgressManager().read(projectRoot);
+
+    expect(transition.nextPhase).toBe(2);
+    expect(progress.currentPhase).toBe(2);
+    expect(progress.design.modules).toHaveLength(1);
+    expect(progress.design.contracts).toHaveLength(0);
+  });
+
   it('auto-appends a Phase 4 summary when the review run completes without one', async () => {
     const pm = new ProgressManager();
     const progress = pm.read(projectRoot);
@@ -123,27 +136,23 @@ type DemoContract = {
     progress.modules = [{ name: 'demo', status: 'done' }];
     pm.write(projectRoot, progress);
 
-    const transition = await new PhaseTransitionManager().resolve(projectRoot, { phase: 4 });
+    const transition = await new PhaseTransitionManager().resolve(projectRoot, {
+      phase: 4,
+      output: 'PASS - Both review passes completed. No P0 issues remain across reviewed modules.',
+    });
     const updatedProgress = pm.read(projectRoot);
-    const progressMd = await fse.readFile(path.join(projectRoot, '.phasegate', 'progress.md'), 'utf-8');
+    const summary = await fse.readFile(
+      path.join(projectRoot, '.phasegate', 'scratchpad', 'summaries', 'phase-4-summary.md'),
+      'utf-8'
+    );
 
     expect(transition.nextPhase).toBe(5);
     expect(updatedProgress.currentPhase).toBe(5);
     expect(updatedProgress.codeReviewPassed).toBe(true);
-    expect(progressMd).toContain('## Phase 4 Summary');
+    expect(summary).toContain('# Phase 4 Summary');
   });
 
   it('creates an acceptance guide and appends a Phase 5 summary', async () => {
-    await fse.writeFile(
-      path.join(projectRoot, '.phasegate', 'requirements', 'requirements.md'),
-      `# template
-
-## Acceptance Criteria
-- [ ] placeholder template criterion
-`,
-      'utf-8'
-    );
-
     await fse.writeFile(
       path.join(projectRoot, '.phasegate', 'requirements', 'feature.md'),
       `# Feature
@@ -156,13 +165,53 @@ type DemoContract = {
 
     const transition = await new PhaseTransitionManager().resolve(projectRoot, { phase: 5 });
     const guide = await fse.readFile(path.join(projectRoot, 'acceptance-guide.md'), 'utf-8');
-    const progressMd = await fse.readFile(path.join(projectRoot, '.phasegate', 'progress.md'), 'utf-8');
+    const archiveEntries = await fse.readdir(path.join(projectRoot, '.phasegate', 'archive'));
+    const archivedScratchpad = await fse.readFile(
+      path.join(
+        projectRoot,
+        '.phasegate',
+        'archive',
+        archiveEntries[0],
+        'scratchpad',
+        'summaries',
+        'phase-5-summary.md'
+      ),
+      'utf-8'
+    );
+    const updatedProgress = new ProgressManager().read(projectRoot);
 
     expect(transition.nextPhase).toBeNull();
     expect(guide).toContain('# ptm-test Acceptance Guide');
     expect(guide).toContain('user can complete the workflow');
-    expect(guide).not.toContain('placeholder template criterion');
-    expect(progressMd).toContain('## Phase 5 Summary');
-    expect(progressMd).toContain('PHASE_DONE');
+    expect(archivedScratchpad).toContain('# Phase 5 Summary');
+    expect(archivedScratchpad).toContain('PHASE_DONE');
+    expect(updatedProgress.currentPhase).toBe(0);
+    expect(updatedProgress.activeRequirement).toBeNull();
+  });
+
+  it('blocks Phase 5 finalization when no acceptance criteria are recorded', async () => {
+    await fse.writeFile(
+      path.join(projectRoot, '.phasegate', 'requirements', 'feature.md'),
+      `# Feature
+
+## Description
+demo
+`,
+      'utf-8'
+    );
+
+    const transition = await new PhaseTransitionManager().resolve(projectRoot, { phase: 5 });
+    const updatedProgress = new ProgressManager().read(projectRoot);
+    const summary = await fse.readFile(
+      path.join(projectRoot, '.phasegate', 'scratchpad', 'summaries', 'phase-5-summary.md'),
+      'utf-8'
+    );
+
+    expect(transition.stopReason).toBe('gate_failed');
+    expect(transition.message).toContain('acceptance criteria recorded: 0');
+    expect(updatedProgress.currentPhase).toBe(2);
+    expect(updatedProgress.activeRequirement).toBe('feature');
+    expect(summary).toContain('PHASE_BLOCKED');
+    expect(summary).toContain('Passed: 0 acceptance criteria recorded');
   });
 });

@@ -3,136 +3,95 @@
 - Type: guide
 - Status: active
 - Reader: both
-- Use when: 首次运行 PhaseGate，或需要快速回忆典型使用路径时
-- Source of truth: 是
-- Update when: 安装要求、基础命令或初始化流程变化时
 
-## Purpose
-
-提供最短路径的安装、初始化和日常使用指引。
-
-## Scope
-
-包含：环境准备、启动方式、典型命令流、AI 路由默认值、常见问题。
-
-不包含：内部实现细节、完整验收清单。
-
-## Environment
+## Requirements
 
 - Node.js 18+
 - npm
-- 至少一个可用的 AI CLI；当前已适配 `claude`（Claude Code）或 `codex`
+- one supported AI CLI adapter: `codex` or `claude-code`
 
-## Run Commands
-
-开发阶段：
+## Typical Setup
 
 ```bash
-npx tsx src/index.ts <command>
-```
-
-构建后：
-
-```bash
+npm install
 npm run build
-node dist/index.js <command>
+phasegate init
 ```
 
-全局链接后：
+During `init`, choose a default adapter or pass:
 
 ```bash
-phasegate <command>
+phasegate init --adapter codex
+phasegate init --adapter claude-code
 ```
 
 ## Typical Flow
 
-1. 初始化项目
-
-```bash
-phasegate init
-```
-
-2. 做 Phase 0 需求讨论
+1. Discuss or refine requirements.
 
 ```bash
 phasegate chat
 phasegate chat --feature login
 ```
 
-3. 推进后续阶段
-
-```bash
-phasegate run
-```
-
-4. 查看状态或进度
+2. Inspect backlog and execution state.
 
 ```bash
 phasegate status
 phasegate progress
 ```
 
-5. 对指定模块做 review
+3. Select one approved requirement.
 
 ```bash
-phasegate review <module>
+phasegate select login
 ```
 
-## Default AI Routing
+4. Execute phases.
 
-`phasegate init` 默认写入以下角色路由：
+```bash
+phasegate run
+```
 
-- `chat` / `phase1` -> `architect`
-- `phase2` / `phase4` / `phase5` -> `reviewer`
-- `phase3.coordinator` -> `architect`
-- `phase3.worker` -> `implementer`
+You can also select and run in one step:
 
-默认 adapter 组合：
+```bash
+phasegate run --requirement login
+```
 
-- `architect` -> `codex`
-- `reviewer` -> `claude-code`
-- `implementer` -> `codex`
+## What To Expect
 
-如需调整，编辑 `.phasegate/phasegate.config.json` 中的 `aiProfiles` 和 `aiRouting`。
-
-## Command Use Notes
-
-- Phase 0 必须用 `chat`，不要用 `run`。
-- 一般优先用 `phasegate run`，只在调试时使用 `--phase N`。
-- `progress.json` 是机器状态来源，`progress.md` 是阅读视图。
+- `chat` handles Phase 0 only
+- `select` binds execution to one requirement
+- `run` continues from the active requirement's current phase
+- `progress.json` is the real state source
+- summaries and worker reports are written under `scratchpad/`
 
 ## Common Problems
 
-### `progress.json not found. Run phasegate init first.`
+### `progress.json not found`
 
-说明当前目录尚未初始化。先运行：
+Run:
 
 ```bash
 phasegate init
 ```
 
-### `Gate failed: No requirements file found`
+### `No active requirement is selected`
 
-说明 Phase 0 没有生成有效需求文件。重新运行：
+Run:
 
 ```bash
-phasegate chat
+phasegate select <requirement>
 ```
 
-### `Prompt file not found`
+or:
 
-通常说明 `prompts/` 缺失，或运行目录不正确。
-
-### `Unsupported runner "gemini"`
-
-说明当前版本已经启用 adapter-based routing，但只适配 `claude-code` 和 `codex`。请把旧 `runner` 或 `aiProfiles.*.adapter` 改成其中之一。
-
-### `Circular dependency: ...`
-
-说明 `.phasegate/tasks/` 中存在循环依赖，需要调整模块设计。
+```bash
+phasegate run --requirement <requirement>
+```
 
 ## Related
 
-- [`workspace-layout.md`](./workspace-layout.md)
-- [`testing.md`](./testing.md)
-- [`../core/workflow-phases.md`](../core/workflow-phases.md)
+- [workspace-layout.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/workspace-layout.md)
+- [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)

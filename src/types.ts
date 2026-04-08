@@ -5,6 +5,7 @@ export type PhaseId = 0 | 1 | 2 | 3 | 4 | 5;
 
 /** Design-time status used for requirements and design.modules. */
 export type ItemStatus = 'pending' | 'done' | 'blocked' | 'failed';
+export type RequirementStatus = 'draft' | 'approved' | 'selected' | 'implemented' | 'archived';
 
 /** Runtime status used for ProjectProgress.modules during Phase 3 orchestration. */
 export type ModuleRunStatus = 'pending' | 'running' | 'done' | 'failed' | 'blocked';
@@ -24,11 +25,18 @@ export interface ContractEntry {
   consumers: string[];
 }
 
+export interface RequirementEntry {
+  name: string;
+  file: string;
+  status: RequirementStatus;
+}
+
 export interface ProjectProgress {
   projectName: string;
   locale?: string;
   currentPhase: PhaseId;
-  requirements: { name: string; status: ItemStatus }[];
+  activeRequirement: string | null;
+  requirements: RequirementEntry[];
   design: {
     modules: ModuleEntry[];
     contracts: ContractEntry[];
@@ -72,6 +80,15 @@ export interface ResultEvent {
     output_tokens: number;
     cost_usd?: number;
   };
+}
+
+export type RunnerStreamLevel = 'none' | 'text' | 'event';
+
+export interface RunnerCapabilities {
+  runStreaming: RunnerStreamLevel;
+  forkStreaming: RunnerStreamLevel;
+  interactiveChat: boolean;
+  structuredWorkerReport: boolean;
 }
 
 export type RunEvent = ToolUseEvent | ResultEvent;

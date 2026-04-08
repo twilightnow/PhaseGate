@@ -10,6 +10,13 @@ jest.mock('../ai-runner', () => ({
 import { Orchestrator } from '../orchestrator';
 import type { IAiRunner } from '../ai-runner';
 
+const runnerCapabilities = {
+  runStreaming: 'event' as const,
+  forkStreaming: 'event' as const,
+  interactiveChat: true,
+  structuredWorkerReport: true,
+};
+
 describe('Orchestrator', () => {
   let projectRoot: string;
   let originalTimeoutEnv: string | undefined;
@@ -63,11 +70,13 @@ describe('Orchestrator', () => {
     );
 
     const coordinatorRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
       run: jest.fn().mockResolvedValue('## Execution Order\n- module-a'),
       fork: jest.fn(),
       chat: jest.fn(),
     };
     const workerRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
       run: jest.fn(),
       fork: jest.fn(() => new Promise(() => undefined)),
       chat: jest.fn(),
@@ -157,11 +166,13 @@ consumers:
     );
 
     const coordinatorRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
       run: jest.fn().mockResolvedValue('## Execution Order\n- run-display'),
       fork: jest.fn(),
       chat: jest.fn(),
     };
     const workerRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
       run: jest.fn(),
       fork: jest.fn().mockResolvedValue({
         scope: 'run-display - display streaming progress',
@@ -176,6 +187,7 @@ consumers:
       .mockResolvedValueOnce(coordinatorRunner)
       .mockResolvedValueOnce(workerRunner);
 
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
     const orchestrator = new Orchestrator();
     const [result] = await orchestrator.run(projectRoot);
 
@@ -184,7 +196,7 @@ consumers:
     expect(mockCreateRunner).toHaveBeenNthCalledWith(2, projectRoot, 'phase3.worker');
     expect(workerRunner.fork).toHaveBeenCalledTimes(1);
 
-    const [contextFiles] = (workerRunner.fork as jest.Mock).mock.calls[0];
+    const [contextFiles, _prompt, hooks] = (workerRunner.fork as jest.Mock).mock.calls[0];
     expect(contextFiles).toContain(
       path.join(projectRoot, '.phasegate', 'tasks', 'run-display.md')
     );
@@ -194,11 +206,62 @@ consumers:
     expect(contextFiles).not.toContain(
       path.join(projectRoot, '.phasegate', 'contracts', 'IUnused.md')
     );
+    expect(hooks).toMatchObject({ onText: expect.any(Function) });
     expect(
       await fse.readFile(
         path.join(projectRoot, '.phasegate', 'scratchpad', 'coordinator', 'brief.md'),
         'utf-8'
       )
     ).toContain('## Execution Order');
+  });
+
+  it('prints worker text lines with module prefixes while a module runs', async () => {
+    await fse.writeFile(
+      path.join(projectRoot, '.phasegate', 'tasks', 'module-a.md'),
+      `# ModuleA
+
+## Dependencies
+| Module | Direction |
+|---|---|
+`,
+      'utf-8'
+    );
+
+    const coordinatorRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
+      run: jest.fn().mockResolvedValue('## Execution Order\n- module-a'),
+      fork: jest.fn(),
+      chat: jest.fn(),
+    };
+    const workerRunner: IAiRunner = {
+      capabilities: jest.fn(() => runnerCapabilities),
+      run: jest.fn(),
+      fork: jest.fn(async (_files, _prompt, hooks) => {
+        hooks?.onText?.('planning');
+        hooks?.onText?.('writing src/module-a.ts');
+        return {
+          scope: 'module-a - example',
+          result: 'done' as const,
+          keyFiles: ['src/module-a.ts'],
+          filesChanged: ['src/module-a.ts'],
+          issues: [],
+        };
+      }),
+      chat: jest.fn(),
+    };
+    mockCreateRunner
+      .mockResolvedValueOnce(coordinatorRunner)
+      .mockResolvedValueOnce(workerRunner);
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const orchestrator = new Orchestrator();
+    await orchestrator.run(projectRoot);
+
+    expect(
+      logSpy.mock.calls.some(([line]) => String(line).includes('[module-a] planning'))
+    ).toBe(true);
+    expect(
+      logSpy.mock.calls.some(([line]) => String(line).includes('[module-a] writing src/module-a.ts'))
+    ).toBe(true);
   });
 });

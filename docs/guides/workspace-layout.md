@@ -3,94 +3,70 @@
 - Type: guide
 - Status: active
 - Reader: both
-- Use when: 需要确认 `.phasegate/` 各目录和文件的职责时
-- Source of truth: 是
-- Update when: `init` 生成内容、工作区布局或文件职责发生变化时
-
-## Purpose
-
-把原先分散的初始化结构说明合并成一份稳定指南。
-
-## Scope
-
-包含：`.phasegate/` 目录树、各文件职责、默认配置和使用边界。
-
-不包含：详细阶段流程、长篇模板示例。
+- Use when: you need to know what belongs under `.phasegate/`
 
 ## Layout
 
 ```text
 .phasegate/
   requirements/
-    requirements.md
-    {feature}.md
   tasks/
   contracts/
   scratchpad/
+  archive/
   progress.json
-  progress.md
   phasegate.config.json
 ```
 
-## File Responsibilities
+## Responsibilities
 
 ### `requirements/`
 
-- Phase 0 的输入与输出目录
-- `init` 会生成一个基础模板
-- 可包含 `requirements.md` 和按功能拆分的需求文档
+- Backlog of requirement documents.
+- Files can be added or revised during Phase 0 discussion.
+- Not blocked by active execution.
 
 ### `tasks/`
 
-- Phase 1 生成的模块任务文档
-- Phase 3 会从中解析模块依赖关系
+- Active task books for the currently selected requirement.
+- Rebuilt or updated during Phase 1 and reviewed in Phase 2.
 
 ### `contracts/`
 
-- Phase 1 生成的接口契约文档
-- Phase 2 gate 会检查其 `## Status` 是否全部为 `finalized`
+- Active interface contracts for the currently selected requirement.
+- Finalized in Phase 2.
 
 ### `scratchpad/`
 
-- Phase 3 worker 的临时产物目录
-- 典型输出是每个模块的 `report.json`
+- Disposable execution output.
+- Common contents:
+  - `coordinator/brief.md`
+  - `{module}/report.json`
+  - `summaries/phase-3-summary.md`
+  - `summaries/phase-4-summary.md`
+  - `summaries/phase-5-summary.md`
+
+### `archive/`
+
+- Historical execution artifacts worth keeping.
+- Populated during finalize after Phase 5.
+- Not a dumping ground for every temporary file.
 
 ### `progress.json`
 
-- 机器状态单一事实源
-
-### `progress.md`
-
-- 阅读视图
-- 由 `ProgressManager` 自动同步
+- Only authoritative execution state file.
+- Tracks `activeRequirement`, `currentPhase`, requirement statuses, runtime module statuses, and blockers.
 
 ### `phasegate.config.json`
 
-- 项目级配置
-- `init` 时自动生成
+- Local configuration for adapter selection and scope routing.
 
-默认配置：
+## Notes
 
-```json
-{
-  "maxLinesPerFile": 500,
-  "minTestCoverage": 80,
-  "runner": "claude"
-}
-```
-
-## Runner Values
-
-- `claude`
-- `gemini`
-- `codex`
-- `openai`
-- `chatgpt`
-
-其中 `openai` 和 `chatgpt` 当前都映射到 `codex` CLI。
+- The current implementation does not maintain `.phasegate/progress.md`.
+- Summaries that used to live in a progress log are now kept under `scratchpad/summaries/`.
 
 ## Related
 
-- [`getting-started.md`](./getting-started.md)
-- [`../core/progress-model.md`](../core/progress-model.md)
-- `src/commands/init.ts`
+- [progress-model.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/progress-model.md)
+- [getting-started.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/getting-started.md)

@@ -1,132 +1,210 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import type { PhaseId, ProjectProgress } from '../types';
+import type {
+  ModuleRunStatus,
+  PhaseId,
+  ProjectProgress,
+  RequirementEntry,
+  RequirementStatus,
+} from '../types';
+import { renderProgressMarkdown } from './progress-report';
 
 const PROGRESS_JSON = path.join('.phasegate', 'progress.json');
-const PROGRESS_MD = path.join('.phasegate', 'progress.md');
 
-const STATUS_SECTION_START = '<!-- ==================== Status Section ==================== -->';
-const SUMMARY_SECTION_START = '<!-- ==================== Phase Summary ==================== -->';
-const SUMMARY_SECTION_NOTE =
-  '<!-- Append phase summaries below. Existing summaries should not be edited. -->';
+const REQUIREMENT_STATUSES: RequirementStatus[] = [
+  'draft',
+  'approved',
+  'selected',
+  'implemented',
+  'archived',
+];
 
-type L10n = {
-  phaseNames: Record<PhaseId, string>;
-  title: string;
-  notice: string;
-  lastUpdated: string;
-  currentPhase: string;
-  requirements: string;
-  design: string;
-  modules: string;
-  contracts: string;
-  designReviewPassed: string;
-  moduleDevelopment: string;
-  codeReview: string;
-  codeReviewPassed: string;
-  blockers: string;
-  notStarted: string;
-  filledAfterPhase1: string;
-  none: string;
-  phaseSummaryHeading: (phase: PhaseId) => string;
-};
+function isRequirementStatus(value: unknown): value is RequirementStatus {
+  return typeof value === 'string' && REQUIREMENT_STATUSES.includes(value as RequirementStatus);
+}
 
-const L10N: Record<string, L10n> = {
-  zh: {
-    phaseNames: {
-      0: '需求讨论',
-      1: '设计生成',
-      2: '设计评审',
-      3: '并行模块开发',
-      4: '代码评审',
-      5: '验收',
+function normalizeRequirementStatus(value: unknown): RequirementStatus {
+  if (isRequirementStatus(value)) {
+    return value;
+  }
+
+  if (value === 'done') {
+    return 'approved';
+  }
+
+  return 'draft';
+}
+
+function normalizeRequirementEntry(entry: unknown): RequirementEntry | null {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const candidate = entry as Record<string, unknown>;
+  const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+  if (!name) {
+    return null;
+  }
+
+  const file =
+    typeof candidate.file === 'string' && candidate.file.trim()
+      ? candidate.file.trim()
+      : `${name}.md`;
+
+  return {
+    name,
+    file,
+    status: normalizeRequirementStatus(candidate.status),
+  };
+}
+
+function normalizeModuleStatus(value: unknown): ModuleRunStatus {
+  switch (value) {
+    case 'running':
+    case 'done':
+    case 'failed':
+    case 'blocked':
+      return value;
+    default:
+      return 'pending';
+  }
+}
+
+function normalizeProgress(raw: unknown): ProjectProgress {
+  const candidate = (raw ?? {}) as Record<string, unknown>;
+  const requirements = Array.isArray(candidate.requirements)
+    ? candidate.requirements
+        .map(normalizeRequirementEntry)
+        .filter((entry): entry is RequirementEntry => entry !== null)
+    : [];
+
+  return {
+    projectName:
+      typeof candidate.projectName === 'string' && candidate.projectName.trim()
+        ? candidate.projectName.trim()
+        : 'phasegate-project',
+    locale: typeof candidate.locale === 'string' ? candidate.locale : undefined,
+    currentPhase:
+      typeof candidate.currentPhase === 'number' &&
+      candidate.currentPhase >= 0 &&
+      candidate.currentPhase <= 5
+        ? (candidate.currentPhase as PhaseId)
+        : 0,
+    activeRequirement:
+      typeof candidate.activeRequirement === 'string' && candidate.activeRequirement.trim()
+        ? candidate.activeRequirement.trim()
+        : null,
+    requirements,
+    design: {
+      modules: Array.isArray((candidate.design as Record<string, unknown> | undefined)?.modules)
+        ? (((candidate.design as Record<string, unknown>).modules as unknown[]) ?? []).flatMap((entry) => {
+            if (!entry || typeof entry !== 'object') return [];
+            const record = entry as Record<string, unknown>;
+            const name = typeof record.name === 'string' ? record.name.trim() : '';
+            if (!name) return [];
+            const status =
+              record.status === 'done' || record.status === 'blocked' || record.status === 'failed'
+                ? record.status
+                : 'pending';
+            return [{ name, status, blockedBy: typeof record.blockedBy === 'string' ? record.blockedBy : undefined }];
+          })
+        : [],
+      contracts: Array.isArray((candidate.design as Record<string, unknown> | undefined)?.contracts)
+        ? (((candidate.design as Record<string, unknown>).contracts as unknown[]) ?? []).flatMap((entry) => {
+            if (!entry || typeof entry !== 'object') return [];
+            const record = entry as Record<string, unknown>;
+            const name = typeof record.name === 'string' ? record.name.trim() : '';
+            if (!name) return [];
+            return [
+              {
+                name,
+                status: record.status === 'finalized' ? 'finalized' : 'draft',
+                provider: typeof record.provider === 'string' ? record.provider : 'unknown',
+                consumers: Array.isArray(record.consumers)
+                  ? record.consumers.filter((value): value is string => typeof value === 'string')
+                  : [],
+              },
+            ];
+          })
+        : [],
+      reviewPassed: Boolean((candidate.design as Record<string, unknown> | undefined)?.reviewPassed),
     },
-    title: '项目进度',
-    notice: '本文件由 PhaseGate 维护，请勿手动编辑状态区段。',
-    lastUpdated: '最后更新',
-    currentPhase: '## 当前阶段',
-    requirements: '## 需求',
-    design: '## 设计',
-    modules: '### 模块',
-    contracts: '### 接口契约',
-    designReviewPassed: '设计评审通过',
-    moduleDevelopment: '## 模块开发',
-    codeReview: '## 代码评审',
-    codeReviewPassed: '代码评审通过',
-    blockers: '## 阻塞项',
-    notStarted: '（未开始）',
-    filledAfterPhase1: '（Phase 1 后填充）',
-    none: '无',
-    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
-  },
-  ja: {
-    phaseNames: {
-      0: '要件整理',
-      1: '設計生成',
-      2: '設計レビュー',
-      3: '並行モジュール開発',
-      4: 'コードレビュー',
-      5: '受入',
-    },
-    title: 'プロジェクト進捗',
-    notice: 'このファイルは PhaseGate によって管理されています。ステータス区間を手動編集しないでください。',
-    lastUpdated: '最終更新',
-    currentPhase: '## 現在のフェーズ',
-    requirements: '## 要件',
-    design: '## 設計',
-    modules: '### モジュール',
-    contracts: '### インターフェース契約',
-    designReviewPassed: '設計レビュー通過',
-    moduleDevelopment: '## モジュール開発',
-    codeReview: '## コードレビュー',
-    codeReviewPassed: 'コードレビュー通過',
-    blockers: '## ブロッカー',
-    notStarted: '（未着手）',
-    filledAfterPhase1: '（Phase 1 後に記入）',
-    none: 'なし',
-    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
-  },
-  en: {
-    phaseNames: {
-      0: 'Requirements Discussion',
-      1: 'Design Generation',
-      2: 'Design Review',
-      3: 'Parallel Module Development',
-      4: 'Code Review',
-      5: 'Acceptance',
-    },
-    title: 'Project Progress',
-    notice: 'This file is maintained by PhaseGate. Do not manually edit the status section.',
-    lastUpdated: 'Last updated',
-    currentPhase: '## Current Phase',
-    requirements: '## Requirements',
-    design: '## Design',
-    modules: '### Modules',
-    contracts: '### Contracts',
-    designReviewPassed: 'Design review passed',
-    moduleDevelopment: '## Module Development',
-    codeReview: '## Code Review',
-    codeReviewPassed: 'Code review passed',
-    blockers: '## Blockers',
-    notStarted: '(not started)',
-    filledAfterPhase1: '(filled after Phase 1)',
-    none: 'None',
-    phaseSummaryHeading: (phase) => `## Phase ${phase} Summary`,
-  },
-};
+    modules: Array.isArray(candidate.modules)
+      ? candidate.modules.flatMap((entry) => {
+          if (!entry || typeof entry !== 'object') return [];
+          const record = entry as Record<string, unknown>;
+          const name = typeof record.name === 'string' ? record.name.trim() : '';
+          if (!name) return [];
+          return [
+            {
+              name,
+              status: normalizeModuleStatus(record.status),
+              blockedBy: typeof record.blockedBy === 'string' ? record.blockedBy : undefined,
+            },
+          ];
+        })
+      : [],
+    codeReviewPassed: Boolean(candidate.codeReviewPassed),
+    blockers: Array.isArray(candidate.blockers)
+      ? candidate.blockers.filter((value): value is string => typeof value === 'string')
+      : [],
+  };
+}
 
-function getL10n(locale?: string): L10n {
-  return L10N[locale ?? 'zh'] ?? L10N.zh;
+function normalizeRequirementName(input: string): string {
+  return path.basename(input.trim(), path.extname(input.trim())).toLowerCase();
+}
+
+function resetExecutionState(progress: ProjectProgress): void {
+  progress.design = {
+    modules: [],
+    contracts: [],
+    reviewPassed: false,
+  };
+  progress.modules = [];
+  progress.codeReviewPassed = false;
+  progress.blockers = [];
+}
+
+function reconcileActiveRequirement(progress: ProjectProgress): void {
+  const activeNormalized = progress.activeRequirement
+    ? normalizeRequirementName(progress.activeRequirement)
+    : null;
+
+  let activeFound = false;
+
+  for (const requirement of progress.requirements) {
+    const requirementNormalized = normalizeRequirementName(requirement.name);
+    if (activeNormalized && requirementNormalized === activeNormalized) {
+      requirement.status = 'selected';
+      progress.activeRequirement = requirement.name;
+      activeFound = true;
+      continue;
+    }
+
+    if (requirement.status === 'selected') {
+      requirement.status = requirement.status === 'selected' ? 'approved' : requirement.status;
+    }
+  }
+
+  if (!activeFound) {
+    progress.activeRequirement = null;
+    progress.currentPhase = 0;
+    resetExecutionState(progress);
+  }
 }
 
 export interface IProgressManager {
   read(cwd: string): ProjectProgress;
   write(cwd: string, progress: ProjectProgress): void;
   updatePhase(cwd: string, phase: PhaseId): void;
+  syncRequirementsFromWorkspace(cwd: string): ProjectProgress;
+  approveRequirementDocs(cwd: string, requirementName?: string): ProjectProgress;
+  activateRequirement(cwd: string, requirementName: string): ProjectProgress;
+  completeActiveRequirement(cwd: string): ProjectProgress;
   markModuleDone(cwd: string, moduleName: string): void;
   markModuleFailed(cwd: string, moduleName: string, error: string): void;
   markModuleBlocked(cwd: string, moduleName: string, blockedBy: string): void;
-  appendPhaseSummary(cwd: string, phase: PhaseId, summary: string): void;
 }
 
 export class ProgressManager implements IProgressManager {
@@ -135,18 +213,166 @@ export class ProgressManager implements IProgressManager {
     if (!fse.existsSync(jsonPath)) {
       throw new Error(`progress.json not found in ${cwd}. Run 'phasegate init' first.`);
     }
-    return fse.readJsonSync(jsonPath) as ProjectProgress;
+
+    return normalizeProgress(fse.readJsonSync(jsonPath));
   }
 
   write(cwd: string, progress: ProjectProgress): void {
     fse.writeJsonSync(path.join(cwd, PROGRESS_JSON), progress, { spaces: 2 });
-    this.syncMdStatus(cwd, progress);
+    fse.writeFileSync(
+      path.join(cwd, '.phasegate', 'progress.md'),
+      renderProgressMarkdown(cwd, progress),
+      'utf-8'
+    );
   }
 
   updatePhase(cwd: string, phase: PhaseId): void {
     const progress = this.read(cwd);
     progress.currentPhase = phase;
     this.write(cwd, progress);
+  }
+
+  syncRequirementsFromWorkspace(cwd: string): ProjectProgress {
+    const progress = this.read(cwd);
+    const requirementsDir = path.join(cwd, '.phasegate', 'requirements');
+    const files = fse.existsSync(requirementsDir)
+      ? fse
+          .readdirSync(requirementsDir)
+          .filter((name) => name.toLowerCase().endsWith('.md') && name.toLowerCase() !== 'requirements.md')
+          .sort()
+      : [];
+
+    const existing = new Map(
+      progress.requirements.map((entry) => [normalizeRequirementName(entry.name), entry] as const)
+    );
+
+    progress.requirements = files.map((file) => {
+      const name = path.basename(file, '.md');
+      const prior = existing.get(normalizeRequirementName(name));
+      return {
+        name,
+        file,
+        status: prior?.status ?? 'draft',
+      };
+    });
+
+    if (
+      progress.activeRequirement &&
+      !progress.requirements.some(
+        (entry) => normalizeRequirementName(entry.name) === normalizeRequirementName(progress.activeRequirement ?? '')
+      )
+    ) {
+      progress.activeRequirement = null;
+      progress.currentPhase = 0;
+      resetExecutionState(progress);
+    }
+
+    reconcileActiveRequirement(progress);
+
+    this.write(cwd, progress);
+    return progress;
+  }
+
+  approveRequirementDocs(cwd: string, requirementName?: string): ProjectProgress {
+    const progress = this.syncRequirementsFromWorkspace(cwd);
+    const target = requirementName ? normalizeRequirementName(requirementName) : null;
+
+    let matched = false;
+    progress.requirements = progress.requirements.map((entry) => {
+      if (target && normalizeRequirementName(entry.name) !== target) {
+        return entry;
+      }
+
+      matched = true;
+      if (entry.status === 'archived' || entry.status === 'implemented') {
+        return entry;
+      }
+
+      if (entry.status === 'selected') {
+        return entry;
+      }
+
+      return { ...entry, status: 'approved' };
+    });
+
+    if (target && !matched) {
+      throw new Error(`Requirement '${requirementName}' not found in .phasegate/requirements/.`);
+    }
+
+    this.write(cwd, progress);
+    return progress;
+  }
+
+  activateRequirement(cwd: string, requirementName: string): ProjectProgress {
+    const progress = this.syncRequirementsFromWorkspace(cwd);
+    const normalizedName = normalizeRequirementName(requirementName);
+    const activeNormalized = progress.activeRequirement
+      ? normalizeRequirementName(progress.activeRequirement)
+      : null;
+
+    if (
+      activeNormalized &&
+      activeNormalized !== normalizedName &&
+      progress.currentPhase !== 0
+    ) {
+      throw new Error(
+        `Requirement '${progress.activeRequirement}' is already active. Finish or finalize it before switching.`
+      );
+    }
+
+    if (activeNormalized && activeNormalized === normalizedName && progress.currentPhase !== 0) {
+      return progress;
+    }
+
+    const entry = progress.requirements.find(
+      (candidate) => normalizeRequirementName(candidate.name) === normalizedName
+    );
+
+    if (!entry) {
+      throw new Error(`Requirement '${requirementName}' not found in .phasegate/requirements/.`);
+    }
+
+    if (entry.status === 'draft') {
+      throw new Error(
+        `Requirement '${entry.name}' is still draft. Complete Phase 0 discussion and gate checks before selecting it.`
+      );
+    }
+
+    for (const requirement of progress.requirements) {
+      if (requirement.status === 'selected') {
+        requirement.status = 'approved';
+      }
+    }
+
+    entry.status = 'selected';
+    progress.activeRequirement = entry.name;
+    progress.currentPhase = 1;
+    resetExecutionState(progress);
+    this.write(cwd, progress);
+    return progress;
+  }
+
+  completeActiveRequirement(cwd: string): ProjectProgress {
+    const progress = this.read(cwd);
+    const activeNormalized = progress.activeRequirement
+      ? normalizeRequirementName(progress.activeRequirement)
+      : null;
+
+    if (activeNormalized) {
+      for (const requirement of progress.requirements) {
+        if (normalizeRequirementName(requirement.name) === activeNormalized) {
+          requirement.status = 'implemented';
+        } else if (requirement.status === 'selected') {
+          requirement.status = 'approved';
+        }
+      }
+    }
+
+    progress.activeRequirement = null;
+    progress.currentPhase = 0;
+    resetExecutionState(progress);
+    this.write(cwd, progress);
+    return progress;
   }
 
   markModuleDone(cwd: string, moduleName: string): void {
@@ -156,6 +382,7 @@ export class ProgressManager implements IProgressManager {
       throw new Error(`Module '${moduleName}' not found in progress.json`);
     }
     mod.status = 'done';
+    delete mod.blockedBy;
     this.write(cwd, progress);
   }
 
@@ -166,6 +393,7 @@ export class ProgressManager implements IProgressManager {
       throw new Error(`Module '${moduleName}' not found in progress.json`);
     }
     mod.status = 'failed';
+    delete mod.blockedBy;
     const blockerEntry = `[${moduleName}] ${error}`;
     if (!progress.blockers.includes(blockerEntry)) {
       progress.blockers.push(blockerEntry);
@@ -182,142 +410,5 @@ export class ProgressManager implements IProgressManager {
     mod.status = 'blocked';
     mod.blockedBy = blockedBy;
     this.write(cwd, progress);
-  }
-
-  appendPhaseSummary(cwd: string, phase: PhaseId, summary: string): void {
-    const mdPath = path.join(cwd, PROGRESS_MD);
-    if (!fse.existsSync(mdPath)) {
-      throw new Error(`progress.md not found in ${cwd}`);
-    }
-    const existing = fse.readFileSync(mdPath, 'utf-8');
-    const progress = this.read(cwd);
-    const l10n = getL10n(progress.locale);
-    const block = `\n${l10n.phaseSummaryHeading(phase)}\n\n${summary}\n`;
-    fse.writeFileSync(mdPath, existing + block, 'utf-8');
-  }
-
-  private syncMdStatus(cwd: string, progress: ProjectProgress): void {
-    const mdPath = path.join(cwd, PROGRESS_MD);
-    const existing = fse.existsSync(mdPath) ? fse.readFileSync(mdPath, 'utf-8') : '';
-
-    const summaryIdx = existing.indexOf(SUMMARY_SECTION_START);
-    const summaryTail =
-      summaryIdx >= 0
-        ? '\n' + existing.slice(summaryIdx)
-        : `\n${SUMMARY_SECTION_START}\n${SUMMARY_SECTION_NOTE}\n`;
-
-    const statusBody = this.buildStatusSection(progress);
-    const newContent = STATUS_SECTION_START + '\n\n' + statusBody + summaryTail;
-
-    fse.writeFileSync(mdPath, newContent, 'utf-8');
-  }
-
-  private buildStatusSection(progress: ProjectProgress): string {
-    const l10n = getL10n(progress.locale);
-    const lines: string[] = [];
-    const phaseName = l10n.phaseNames[progress.currentPhase];
-    const today = new Date().toISOString().split('T')[0];
-
-    lines.push(`# ${progress.projectName} ${l10n.title}`);
-    lines.push('');
-    lines.push(`> ${l10n.notice}`);
-    lines.push('');
-    lines.push(`${l10n.lastUpdated}: ${today}`);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.currentPhase);
-    lines.push('');
-    lines.push(`Phase ${progress.currentPhase}: ${phaseName}`);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.requirements);
-    lines.push('');
-    if (progress.requirements.length === 0) {
-      lines.push(l10n.notStarted);
-    } else {
-      for (const req of progress.requirements) {
-        const tick = req.status === 'done' ? 'x' : ' ';
-        lines.push(`- [${tick}] ${req.name}`);
-      }
-    }
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.design);
-    lines.push('');
-    if (progress.design.modules.length === 0) {
-      lines.push(l10n.filledAfterPhase1);
-      lines.push('');
-    } else {
-      lines.push(l10n.modules);
-      lines.push('');
-      for (const mod of progress.design.modules) {
-        const tick = mod.status === 'done' ? 'x' : ' ';
-        lines.push(`- [${tick}] ${mod.name}`);
-      }
-      lines.push('');
-    }
-
-    if (progress.design.contracts.length > 0) {
-      lines.push(l10n.contracts);
-      lines.push('');
-      lines.push('| Contract | Status | Provider | Consumers |');
-      lines.push('|---|---|---|---|');
-      for (const contract of progress.design.contracts) {
-        lines.push(
-          `| ${contract.name} | ${contract.status} | ${contract.provider} | ${contract.consumers.join(', ')} |`
-        );
-      }
-      lines.push('');
-    }
-
-    const reviewTick = progress.design.reviewPassed ? 'x' : ' ';
-    lines.push(`- [${reviewTick}] ${l10n.designReviewPassed}`);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.moduleDevelopment);
-    lines.push('');
-    if (progress.modules.length === 0) {
-      lines.push(l10n.filledAfterPhase1);
-    } else {
-      for (const mod of progress.modules) {
-        const tick = mod.status === 'done' ? 'x' : ' ';
-        const statusNote =
-          mod.status !== 'pending' && mod.status !== 'done' ? ` - ${mod.status}` : '';
-        const blockedNote = mod.blockedBy ? ` (blocked by ${mod.blockedBy})` : '';
-        lines.push(`- [${tick}] ${mod.name}${statusNote}${blockedNote}`);
-      }
-    }
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.codeReview);
-    lines.push('');
-    const codeReviewTick = progress.codeReviewPassed ? 'x' : ' ';
-    lines.push(`- [${codeReviewTick}] ${l10n.codeReviewPassed}`);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    lines.push(l10n.blockers);
-    lines.push('');
-    if (progress.blockers.length === 0) {
-      lines.push(l10n.none);
-    } else {
-      for (const blocker of progress.blockers) {
-        lines.push(`- ${blocker}`);
-      }
-    }
-    lines.push('');
-
-    return lines.join('\n');
   }
 }

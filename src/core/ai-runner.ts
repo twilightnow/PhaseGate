@@ -1,11 +1,23 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import type { WorkerReport, RunEvent, ToolUseEvent, ResultEvent } from '../types';
+import type {
+  WorkerReport,
+  RunEvent,
+  ToolUseEvent,
+  ResultEvent,
+  RunnerCapabilities,
+} from '../types';
+
+export interface RunHooks {
+  onEvent?: (event: RunEvent) => void;
+  onText?: (text: string) => void;
+}
 
 export interface IAiRunner {
-  run(files: string[], prompt: string, onEvent?: (event: RunEvent) => void): Promise<string>;
-  fork(files: string[], prompt: string): Promise<WorkerReport>;
+  capabilities(): RunnerCapabilities;
+  run(files: string[], prompt: string, hooks?: RunHooks | ((event: RunEvent) => void)): Promise<string>;
+  fork(files: string[], prompt: string, hooks?: RunHooks): Promise<WorkerReport>;
   chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void>;
 }
 
@@ -38,9 +50,11 @@ interface RunnerConfig {
 interface RunnerDefinition {
   command: string;
   buildRunArgs: (prompt: string) => string[];
+  buildStreamingRunArgs?: (prompt: string) => string[];
   buildChatArgs: (systemPrompt: string, systemPromptFile?: string, initialMessage?: string) => string[];
   /** When true, the prompt is sent via stdin and buildRunArgs must not include it */
   useStdinForPrompt?: boolean;
+  capabilities: RunnerCapabilities;
 }
 
 const CODEX_CONFIG_ARGS = [
@@ -50,12 +64,14 @@ const CODEX_CONFIG_ARGS = [
   'windows.sandbox="unelevated"',
 ];
 const CODEX_SANDBOX_ARGS = ['-s', 'workspace-write'];
+const CODEX_CHAT_INSTRUCTIONS_FILE_PREFIX = '.codex-chat-instructions';
 
 const ADAPTER_DEFINITIONS: Record<AdapterName, RunnerDefinition> = {
   'claude-code': {
     command: 'claude',
     // Prompt is piped via stdin to avoid multi-line shell-escaping issues on Windows
     buildRunArgs: () => ['--print'],
+    buildStreamingRunArgs: () => ['--output-format', 'stream-json', '--verbose', '--print'],
     useStdinForPrompt: true,
     buildChatArgs: (systemPrompt, systemPromptFile, initialMessage) => {
       const args: string[] = [];
@@ -65,6 +81,12 @@ const ADAPTER_DEFINITIONS: Record<AdapterName, RunnerDefinition> = {
       // Positional arg — Claude responds to this first, then enters interactive REPL
       if (initialMessage) args.push(initialMessage);
       return args;
+    },
+    capabilities: {
+      runStreaming: 'event',
+      forkStreaming: 'text',
+      interactiveChat: true,
+      structuredWorkerReport: true,
     },
   },
   codex: {
@@ -77,12 +99,26 @@ const ADAPTER_DEFINITIONS: Record<AdapterName, RunnerDefinition> = {
       ...CODEX_SANDBOX_ARGS,
       '-',
     ],
+    buildStreamingRunArgs: () => [
+      'exec',
+      ...CODEX_CONFIG_ARGS,
+      '--skip-git-repo-check',
+      ...CODEX_SANDBOX_ARGS,
+      '--json',
+      '-',
+    ],
     useStdinForPrompt: true,
     buildChatArgs: (systemPrompt) => [
       ...CODEX_CONFIG_ARGS,
       ...CODEX_SANDBOX_ARGS,
       ...(systemPrompt ? [systemPrompt] : []),
     ],
+    capabilities: {
+      runStreaming: 'event',
+      forkStreaming: 'event',
+      interactiveChat: true,
+      structuredWorkerReport: true,
+    },
   },
 };
 
@@ -97,29 +133,81 @@ const LEGACY_RUNNER_ALIASES: Record<string, AdapterName> = {
 export class CliRunner implements IAiRunner {
   constructor(private readonly definition: RunnerDefinition) {}
 
-  async run(files: string[], prompt: string, onEvent?: (event: RunEvent) => void): Promise<string> {
+  capabilities(): RunnerCapabilities {
+    return this.definition.capabilities;
+  }
+
+  async run(files: string[], prompt: string, hooks?: RunHooks | ((event: RunEvent) => void)): Promise<string> {
     const fullPrompt = await buildContextPrompt(files, prompt);
-    if (onEvent && this.definition.command === 'claude') {
-      return spawnCliStreaming(fullPrompt, onEvent);
+    const normalizedHooks = normalizeHooks(hooks);
+
+    if (normalizedHooks && this.definition.capabilities.runStreaming === 'event') {
+      if (this.definition.command === 'claude') {
+        return spawnClaudeStreaming(fullPrompt, normalizedHooks);
+      }
+      if (this.definition.command === 'codex') {
+        return spawnCodexStreaming(
+          this.definition.command,
+          this.definition.buildStreamingRunArgs?.(fullPrompt) ?? this.definition.buildRunArgs(fullPrompt),
+          this.definition.useStdinForPrompt ? fullPrompt : undefined,
+          normalizedHooks
+        );
+      }
     }
+
+    if (normalizedHooks?.onText && this.definition.capabilities.runStreaming === 'text') {
+      const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
+      return spawnCliTextStreaming(
+        this.definition.command,
+        this.definition.buildRunArgs(fullPrompt),
+        stdinContent,
+        normalizedHooks.onText
+      );
+    }
+
     const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
     return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
   }
 
-  async fork(files: string[], prompt: string): Promise<WorkerReport> {
+  async fork(files: string[], prompt: string, hooks?: RunHooks): Promise<WorkerReport> {
     const fullPrompt = await buildContextPrompt(files, prompt);
     const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
-    const output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
+    let output: string;
+
+    if (hooks && this.definition.capabilities.forkStreaming === 'event' && this.definition.command === 'codex') {
+      output = await spawnCodexStreaming(
+        this.definition.command,
+        this.definition.buildStreamingRunArgs?.(fullPrompt) ?? this.definition.buildRunArgs(fullPrompt),
+        stdinContent,
+        hooks
+      );
+    } else if (hooks?.onText && this.definition.capabilities.forkStreaming === 'text') {
+      output = await spawnCliTextStreaming(
+        this.definition.command,
+        this.definition.buildRunArgs(fullPrompt),
+        stdinContent,
+        hooks.onText
+      );
+    } else {
+      output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
+    }
+
     return parseWorkerReport(output);
   }
 
   async chat(systemPrompt: string, systemPromptFile?: string, initialMessage?: string): Promise<void> {
     if (this.definition.command === 'codex') {
       const startupPrompt = await buildCodexChatPrompt(systemPrompt, systemPromptFile, initialMessage);
-      await spawnCliInteractive(
-        this.definition.command,
-        this.definition.buildChatArgs(startupPrompt)
+      const invocation = await prepareCodexChatInvocation(
+        startupPrompt,
+        systemPrompt,
+        systemPromptFile
       );
+      try {
+        await spawnCliInteractive(this.definition.command, invocation.args);
+      } finally {
+        await invocation.cleanup();
+      }
       return;
     }
 
@@ -142,6 +230,21 @@ export async function createRunner(
 ): Promise<IAiRunner> {
   const adapterName = await resolveAdapterName(projectRoot, scope);
   return new CliRunner(ADAPTER_DEFINITIONS[adapterName]);
+}
+
+function normalizeHooks(hooks?: RunHooks | ((event: RunEvent) => void)): RunHooks | undefined {
+  if (!hooks) return undefined;
+  if (typeof hooks === 'function') {
+    return { onEvent: hooks };
+  }
+  return hooks;
+}
+
+export async function getRunnerAdapterName(
+  projectRoot: string = process.cwd(),
+  scope: RunnerScope = 'default'
+): Promise<AdapterName> {
+  return resolveAdapterName(projectRoot, scope);
 }
 
 async function buildContextPrompt(files: string[], prompt: string): Promise<string> {
@@ -258,10 +361,55 @@ function isAdapterName(value: string): value is AdapterName {
   return value in ADAPTER_DEFINITIONS;
 }
 
+interface ResolvedCliInvocation {
+  command: string;
+  args: string[];
+  shell: boolean;
+}
+
+async function resolveCliInvocation(
+  command: string,
+  args: string[]
+): Promise<ResolvedCliInvocation> {
+  if (process.platform === 'win32' && command === 'codex') {
+    const codexScriptPath = path.join(
+      path.dirname(process.execPath),
+      'node_modules',
+      '@openai',
+      'codex',
+      'bin',
+      'codex.js'
+    );
+
+    if (await fse.pathExists(codexScriptPath)) {
+      return {
+        command: process.execPath,
+        args: [codexScriptPath, ...args],
+        shell: false,
+      };
+    }
+  }
+
+  return {
+    command,
+    args,
+    shell: process.platform === 'win32',
+  };
+}
+
 async function buildCodexChatPrompt(
   systemPrompt: string,
   systemPromptFile?: string,
   initialMessage?: string
+): Promise<string> {
+  void systemPrompt;
+  void systemPromptFile;
+  return initialMessage?.trim() ?? '';
+}
+
+async function buildCodexChatInstructions(
+  systemPrompt: string,
+  systemPromptFile?: string
 ): Promise<string> {
   const parts: string[] = [];
 
@@ -273,19 +421,43 @@ async function buildCodexChatPrompt(
   const inlinePrompt = systemPrompt.trim();
   if (inlinePrompt) parts.push(inlinePrompt);
 
-  const kickoffMessage = initialMessage?.trim();
-  if (kickoffMessage) {
-    parts.push(['Start the session with this first user-facing message:', kickoffMessage].join('\n'));
-  }
-
   return parts.join('\n\n');
 }
 
+async function prepareCodexChatInvocation(
+  startupPrompt: string,
+  systemPrompt: string,
+  systemPromptFile?: string
+): Promise<{ args: string[]; cleanup: () => Promise<void> }> {
+  const args = [...CODEX_CONFIG_ARGS, ...CODEX_SANDBOX_ARGS];
+  const instructions = await buildCodexChatInstructions(systemPrompt, systemPromptFile);
+  let cleanup = async (): Promise<void> => {};
+
+  if (instructions) {
+    const instructionsFileName = `${CODEX_CHAT_INSTRUCTIONS_FILE_PREFIX}-${process.pid}-${Date.now()}.md`;
+    const instructionsFilePath = path.join(process.cwd(), '.phasegate', instructionsFileName);
+    await fse.ensureDir(path.dirname(instructionsFilePath));
+    await fse.writeFile(instructionsFilePath, instructions, 'utf-8');
+    args.push('-c', `model_instructions_file=${JSON.stringify(instructionsFilePath)}`);
+    cleanup = async (): Promise<void> => {
+      await fse.remove(instructionsFilePath);
+    };
+  }
+
+  if (startupPrompt) {
+    args.push(startupPrompt);
+  }
+
+  return { args, cleanup };
+}
+
 function spawnCli(command: string, args: string[], stdinContent?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
+  return new Promise(async (resolve, reject) => {
+    const invocation = await resolveCliInvocation(command, args);
+
+    const proc = spawn(invocation.command, invocation.args, {
       stdio: [stdinContent !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
+      shell: invocation.shell,
       windowsHide: true,
     });
 
@@ -317,11 +489,75 @@ function spawnCli(command: string, args: string[], stdinContent?: string): Promi
   });
 }
 
+function spawnCliTextStreaming(
+  command: string,
+  args: string[],
+  stdinContent: string | undefined,
+  onText: (text: string) => void
+): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    const invocation = await resolveCliInvocation(command, args);
+
+    const proc = spawn(invocation.command, invocation.args, {
+      stdio: [stdinContent !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+      shell: invocation.shell,
+      windowsHide: true,
+    });
+
+    if (stdinContent !== undefined && proc.stdin) {
+      proc.stdin.write(stdinContent);
+      proc.stdin.end();
+    }
+
+    let stdout = '';
+    let stderr = '';
+    let buffer = '';
+
+    const flushLine = (line: string): void => {
+      const trimmed = line.replace(/\r$/, '');
+      if (trimmed.length > 0) {
+        onText(trimmed);
+      }
+    };
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        flushLine(line);
+      }
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (buffer.length > 0) {
+        flushLine(buffer);
+      }
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${code}\n${stderr}`));
+        return;
+      }
+
+      resolve(stdout.trim());
+    });
+
+    proc.on('error', (err) => reject(err));
+  });
+}
+
 function spawnCliInteractive(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
+  return new Promise(async (resolve, reject) => {
+    const invocation = await resolveCliInvocation(command, args);
+
+    const proc = spawn(invocation.command, invocation.args, {
       stdio: 'inherit',
-      shell: process.platform === 'win32',
+      shell: invocation.shell,
       windowsHide: true,
     });
 
@@ -338,7 +574,7 @@ function spawnCliInteractive(command: string, args: string[]): Promise<void> {
   });
 }
 
-function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): Promise<string> {
+function spawnClaudeStreaming(prompt: string, hooks: RunHooks): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn('claude', ['--output-format', 'stream-json', '--verbose', '--print'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -385,7 +621,7 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
           const event: ToolUseEvent = { type: 'tool_use', name: toolName };
           const extracted = extractToolInput(toolName, inputObj);
           if (extracted !== undefined) event.input = extracted;
-          onEvent(event);
+          hooks.onEvent?.(event);
         }
       } else if (obj['type'] === 'result') {
         sawResult = true;
@@ -394,7 +630,7 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
         if (usage && typeof usage === 'object') {
           resultEvent.usage = usage as ResultEvent['usage'];
         }
-        onEvent(resultEvent);
+        hooks.onEvent?.(resultEvent);
         resultText = typeof obj['result'] === 'string' ? obj['result'] : '';
       }
     };
@@ -429,6 +665,177 @@ function spawnCliStreaming(prompt: string, onEvent: (event: RunEvent) => void): 
 
     proc.on('error', reject);
   });
+}
+
+function spawnCodexStreaming(
+  command: string,
+  args: string[],
+  stdinContent: string | undefined,
+  hooks: RunHooks
+): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    const invocation = await resolveCliInvocation(command, args);
+
+    const proc = spawn(invocation.command, invocation.args, {
+      stdio: [stdinContent !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+      shell: invocation.shell,
+      windowsHide: true,
+    });
+
+    if (stdinContent !== undefined && proc.stdin) {
+      proc.stdin.write(stdinContent);
+      proc.stdin.end();
+    }
+
+    let stderr = '';
+    let buffer = '';
+    let finalMessage = '';
+
+    const processStreamLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        hooks.onText?.(trimmed);
+        return;
+      }
+
+      if (!parsed || typeof parsed !== 'object') return;
+      const obj = parsed as Record<string, unknown>;
+      const type = typeof obj['type'] === 'string' ? obj['type'] : '';
+
+      if (type === 'item.started') {
+        const item = obj['item'];
+        if (!item || typeof item !== 'object') return;
+        const itemRecord = item as Record<string, unknown>;
+        emitCodexItemEvent(itemRecord, hooks);
+        return;
+      }
+
+      if (type === 'item.completed') {
+        const item = obj['item'];
+        if (!item || typeof item !== 'object') return;
+        const itemRecord = item as Record<string, unknown>;
+        const itemType = typeof itemRecord['type'] === 'string' ? itemRecord['type'] : '';
+        if (itemType === 'agent_message') {
+          const text = typeof itemRecord['text'] === 'string' ? itemRecord['text'].trim() : '';
+          if (text) {
+            finalMessage = text;
+          }
+        } else if (itemType === 'file_change' && !hooks.onEvent && hooks.onText) {
+          emitCodexItemText(itemRecord, hooks.onText);
+        }
+        return;
+      }
+
+      if (type === 'turn.completed') {
+        const usage = obj['usage'];
+        const resultEvent: ResultEvent = { type: 'result' };
+        if (usage && typeof usage === 'object') {
+          const usageRecord = usage as Record<string, unknown>;
+          const inputTokens = numberValue(usageRecord['input_tokens']);
+          const outputTokens = numberValue(usageRecord['output_tokens']);
+          if (inputTokens !== undefined && outputTokens !== undefined) {
+            resultEvent.usage = {
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+            };
+          }
+        }
+        hooks.onEvent?.(resultEvent);
+      }
+    };
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        processStreamLine(line);
+      }
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (buffer.length > 0) {
+        processStreamLine(buffer);
+      }
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${code}\n${stderr}`));
+        return;
+      }
+
+      resolve(finalMessage);
+    });
+
+    proc.on('error', (err) => reject(err));
+  });
+}
+
+function emitCodexItemEvent(item: Record<string, unknown>, hooks: RunHooks): void {
+  const itemType = typeof item['type'] === 'string' ? item['type'] : '';
+  if (itemType === 'command_execution') {
+    const commandText = typeof item['command'] === 'string' ? item['command'] : undefined;
+    hooks.onEvent?.({
+      type: 'tool_use',
+      name: 'Bash',
+      input: commandText ? commandText.slice(0, 60) : undefined,
+    });
+    if (!hooks.onEvent && hooks.onText && commandText) {
+      hooks.onText(commandText);
+    }
+    return;
+  }
+
+  if (itemType === 'file_change') {
+    const changes = Array.isArray(item['changes']) ? item['changes'] : [];
+    for (const change of changes) {
+      if (!change || typeof change !== 'object') continue;
+      const record = change as Record<string, unknown>;
+      const rawPath = typeof record['path'] === 'string' ? record['path'] : undefined;
+      const kind = typeof record['kind'] === 'string' ? record['kind'] : 'edit';
+      const displayPath = rawPath ? toDisplayPath(rawPath) : undefined;
+      hooks.onEvent?.({
+        type: 'tool_use',
+        name: kind === 'add' ? 'Write' : 'Edit',
+        input: displayPath,
+      });
+      if (!hooks.onEvent && hooks.onText && displayPath) {
+        hooks.onText(`${kind} ${displayPath}`);
+      }
+    }
+  }
+}
+
+function emitCodexItemText(item: Record<string, unknown>, onText: (text: string) => void): void {
+  const changes = Array.isArray(item['changes']) ? item['changes'] : [];
+  for (const change of changes) {
+    if (!change || typeof change !== 'object') continue;
+    const record = change as Record<string, unknown>;
+    const rawPath = typeof record['path'] === 'string' ? record['path'] : undefined;
+    const kind = typeof record['kind'] === 'string' ? record['kind'] : 'edit';
+    if (rawPath) {
+      onText(`${kind} ${toDisplayPath(rawPath)}`);
+    }
+  }
+}
+
+function toDisplayPath(rawPath: string): string {
+  const relativePath = path.relative(process.cwd(), rawPath);
+  if (!relativePath || relativePath.startsWith('..')) {
+    return rawPath;
+  }
+  return relativePath;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
 }
 
 function extractToolInput(name: string, input: Record<string, unknown> | undefined): string | undefined {

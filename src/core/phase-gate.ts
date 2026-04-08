@@ -12,6 +12,19 @@ const LOCALE_SECTIONS: Record<string, string[]> = {
   ja: ['## 説明', '## スコープ', '## 受入基準'],
 };
 
+function buildSectionAliasGroups(fallbackSections: string[]): string[][] {
+  return fallbackSections.map((section, index) => {
+    const aliases = new Set<string>([section]);
+    for (const localizedSections of Object.values(LOCALE_SECTIONS)) {
+      const alias = localizedSections[index];
+      if (alias) {
+        aliases.add(alias);
+      }
+    }
+    return Array.from(aliases);
+  });
+}
+
 export function detectLocale(): string {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -36,6 +49,19 @@ export function getRequiredSections(locale?: string): string[] {
   return LOCALE_SECTIONS[lang] ?? LOCALE_SECTIONS.zh;
 }
 
+export function buildLocalLanguageInstruction(locale?: string): string {
+  const lang = locale ?? detectLocale();
+  const languageName =
+    lang === 'ja' ? 'Japanese' : lang === 'zh' ? 'Simplified Chinese' : 'English';
+
+  return [
+    'Language policy:',
+    '- Keep all provided instructions, filenames, code, and any required headings/templates exactly as written.',
+    `- Use ${languageName} for user-facing narrative or conversational text.`,
+    '- If a task requires an exact template or exact headings, preserve them exactly and localize only surrounding explanatory prose.',
+  ].join('\n');
+}
+
 async function loadRequiredSections(cwd: string): Promise<string[]> {
   const configPath = path.join(cwd, '.phasegate', 'phasegate.config.json');
   try {
@@ -50,12 +76,7 @@ async function loadRequiredSections(cwd: string): Promise<string[]> {
   return getRequiredSections();
 }
 
-/**
- * Gate check for Phase 0 -> Phase 1 transition.
- * Verifies that at least one requirements file, excluding the init template,
- * exists and contains the required sections.
- */
-export async function checkPhase0Gate(cwd: string): Promise<GateResult> {
+export async function checkPhase0Gate(cwd: string, featureName?: string): Promise<GateResult> {
   const reqDir = path.join(cwd, '.phasegate', 'requirements');
   const issues: string[] = [];
 
@@ -67,34 +88,35 @@ export async function checkPhase0Gate(cwd: string): Promise<GateResult> {
     return { passed: false, issues };
   }
 
-  const mdFiles = files.filter((f) => f.endsWith('.md') && f !== 'requirements.md');
+  const allRequirementFiles = files.filter((f) => f.endsWith('.md') && f !== 'requirements.md');
+  const normalizedFeature = featureName
+    ? path.basename(featureName.trim(), path.extname(featureName.trim())).toLowerCase()
+    : null;
+  const mdFiles = normalizedFeature
+    ? allRequirementFiles.filter(
+        (file) => path.basename(file, '.md').toLowerCase() === normalizedFeature
+      )
+    : allRequirementFiles;
   if (mdFiles.length === 0) {
-    issues.push('No requirements file found; expected .phasegate/requirements/{feature-name}.md');
+    if (normalizedFeature) {
+      issues.push(`No requirements file found for feature "${featureName}"`);
+    } else {
+      issues.push('No requirements file found; expected .phasegate/requirements/{feature-name}.md');
+    }
     return { passed: false, issues };
   }
 
   const fallbackSections = await loadRequiredSections(cwd);
-  const allSectionSets = Object.values(LOCALE_SECTIONS);
-  if (!allSectionSets.some((sections) => sections === fallbackSections)) {
-    allSectionSets.push(fallbackSections);
-  }
+  const aliasGroups = buildSectionAliasGroups(fallbackSections);
 
   for (const file of mdFiles) {
     const content = await fse.readFile(path.join(reqDir, file), 'utf-8');
 
-    const satisfied = allSectionSets.some((sections) => sections.every((section) => content.includes(section)));
-    if (satisfied) continue;
-
-    const bestSet = allSectionSets.reduce((best, sections) => {
-      const matches = sections.filter((section) => content.includes(section)).length;
-      const bestMatches = best.filter((section) => content.includes(section)).length;
-      return matches > bestMatches ? sections : best;
-    }, fallbackSections);
-
-    for (const section of bestSet) {
-      if (!content.includes(section)) {
-        issues.push(`${file}: missing section "${section}"`);
+    for (const [index, aliases] of aliasGroups.entries()) {
+      if (aliases.some((section) => content.includes(section))) {
+        continue;
       }
+      issues.push(`${file}: missing section "${fallbackSections[index]}"`);
     }
   }
 

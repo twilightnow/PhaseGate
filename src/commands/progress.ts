@@ -1,29 +1,28 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import * as path from 'path';
-import * as fse from 'fs-extra';
+import { ProgressManager } from '../core/progress-manager';
 
 export function createProgressCommand(): Command {
   const cmd = new Command('progress');
 
   cmd
-    .description('Show detailed progress document (reads progress.md)')
-    .action(async () => {
+    .description('Show structured progress state (reads progress.json)')
+    .action(() => {
       const cwd = process.cwd();
-      const mdPath = path.join(cwd, '.phasegate', 'progress.md');
+      const manager = new ProgressManager();
 
-      if (!(await fse.pathExists(mdPath))) {
+      try {
+        const progress = manager.syncRequirementsFromWorkspace(cwd);
+        console.log(JSON.stringify(progress, null, 2));
+      } catch {
         console.error(
           chalk.red('Error:') +
-            ' .phasegate/progress.md not found. Run ' +
+            ' .phasegate/progress.json not found. Run ' +
             chalk.bold('phasegate init') +
             ' first.'
         );
         process.exit(1);
       }
-
-      const content = await fse.readFile(mdPath, 'utf-8');
-      console.log(content);
     });
 
   return cmd;

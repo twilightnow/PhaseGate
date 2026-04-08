@@ -6,6 +6,7 @@ import { createRunCommand } from './commands/run';
 import { createReviewCommand } from './commands/review';
 import { createChatCommand } from './commands/chat';
 import { createProgressCommand } from './commands/progress';
+import { createSelectCommand } from './commands/select';
 
 const program = new Command();
 
@@ -19,6 +20,7 @@ program.addCommand(createStatusCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createReviewCommand());
 program.addCommand(createChatCommand());
+program.addCommand(createSelectCommand());
 program.addCommand(createProgressCommand());
 
 program.parse();

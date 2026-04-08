@@ -60,23 +60,23 @@
 
 | Legacy Document | Result | Main Issue | Action | Notes |
 |---|---|---|---|---|
-| `archive/legacy-2026-04/design/00_overview.md` | partially_confirmed | 内容大体正确，但与新 `core/overview.md` 重复 | 归档 | 有追溯价值，无需再作为主文档 |
-| `archive/legacy-2026-04/design/01_workflow_phases.md` | confirmed_but_redundant | 与新 `core/workflow-phases.md` 重复 | 归档 | 内容本身基本准确 |
-| `archive/legacy-2026-04/design/02_progress_document.md` | confirmed_but_redundant | 与新 `core/progress-model.md` 重复 | 归档 | 内容本身基本准确 |
-| `archive/legacy-2026-04/design/03_architecture_constraints.md` | confirmed_but_redundant | 与新 `core/architecture-constraints.md` 重复 | 归档 | 原内容有效，路径已被新文档替代 |
-| `archive/legacy-2026-04/design/04_product_roadmap.md` | deleted | 写明“Phase 1 之后自动阶段推进闭环未完成”，且无保留价值 | 删除 | 已删除 |
-| `archive/legacy-2026-04/design/05_cli_design.md` | partially_confirmed | 部分内容准确，但与新 `core/cli-surface.md` 重复且可能继续漂移 | 归档 | 适合保留历史设计口径，不适合作为主文档 |
-| `archive/legacy-2026-04/guide/usage_guide.md` | partially_confirmed | 主流程基本正确，但与 `testing`、`init-structure` 重复 | 归档 | 已拆并进 `guides/getting-started.md` |
-| `archive/legacy-2026-04/guide/testing.md` | confirmed_but_redundant | 内容有效，但已被新 `guides/testing.md` 接管 | 归档 | 可随时删除其旧副本 |
-| `archive/legacy-2026-04/guide/command_internals.md` | partially_confirmed | 对 `init` 等命令有价值，但细节较长且维护成本高 | 归档 | 其核心事实已并入 `core/cli-surface.md` |
-| `archive/legacy-2026-04/guide/functional_check.md` | deleted | 混入环境权限建议和阶段性自检清单，噪声高且易过时 | 删除 | 已删除 |
-| `archive/legacy-2026-04/guide/acceptance-guide.md` | deleted | 标题写 Phase 2，正文写人工验收，边界混乱 | 删除 | 已删除 |
-| `archive/legacy-2026-04/guide/init-structure/config_guide.md` | confirmed_but_redundant | 与工作区和入门文档重复 | 归档 | 已合并进 `guides/workspace-layout.md` |
-| `archive/legacy-2026-04/guide/init-structure/design_contracts_guide.md` | deleted | 继续使用 `design/` 说法，但当前代码是 `tasks/` | 删除 | 已删除 |
-| `archive/legacy-2026-04/guide/init-structure/phasegate_structure.md` | deleted | 目录树仍写 `.phasegate/design/` | 删除 | 已删除 |
-| `archive/legacy-2026-04/guide/init-structure/progress_guide.md` | confirmed_but_redundant | 主要内容有效，但与新 `core/progress-model.md` / `guides/workspace-layout.md` 重复 | 归档 | 可删除其旧副本 |
-| `archive/legacy-2026-04/guide/init-structure/requirements_guide.md` | partially_confirmed | 需求目录定位基本正确，但粒度过细 | 归档 | 已并入 `guides/workspace-layout.md` |
-| `archive/legacy-2026-04/ideas.md` | archived | 旧草稿副本 | 归档 | 当前活动草稿入口改为 `docs/ideas.md` |
+| `archive/legacy-2026-04/design/00_overview.md` | merged_then_deleted | 与新 `core/overview.md` 重复 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/design/01_workflow_phases.md` | merged_then_deleted | 与新 `core/workflow-phases.md` 重复 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/design/02_progress_document.md` | merged_then_deleted | 与新 `core/progress-model.md` 重复 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/design/03_architecture_constraints.md` | merged_then_deleted | 与新 `core/architecture-constraints.md` 重复 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/design/04_product_roadmap.md` | deleted | 已过时且无追溯必要 | 删除 | 已删除 |
+| `archive/legacy-2026-04/design/05_cli_design.md` | merged_then_deleted | 与新 `core/cli-surface.md` 重复且易漂移 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/guide/usage_guide.md` | merged_then_deleted | 已被 `guides/getting-started.md` 覆盖 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/guide/testing.md` | merged_then_deleted | 已被 `guides/testing.md` 覆盖 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/guide/command_internals.md` | merged_then_deleted | 长篇重复内部说明，维护成本高 | 删除 | 核心事实保留在 `core/cli-surface.md` |
+| `archive/legacy-2026-04/guide/functional_check.md` | deleted | 噪声高且易过时 | 删除 | 已删除 |
+| `archive/legacy-2026-04/guide/acceptance-guide.md` | deleted | 标题与正文边界混乱 | 删除 | 已删除 |
+| `archive/legacy-2026-04/guide/init-structure/config_guide.md` | merged_then_deleted | 与工作区和入门文档重复 | 删除 | 关键配置说明已并入 `guides/workspace-layout.md` |
+| `archive/legacy-2026-04/guide/init-structure/design_contracts_guide.md` | deleted | 使用旧 `design/` 术语 | 删除 | 已删除 |
+| `archive/legacy-2026-04/guide/init-structure/phasegate_structure.md` | deleted | 目录树已失效 | 删除 | 已删除 |
+| `archive/legacy-2026-04/guide/init-structure/progress_guide.md` | merged_then_deleted | 与 `core/progress-model.md` / `guides/workspace-layout.md` 重复 | 删除 | 无独立保留价值 |
+| `archive/legacy-2026-04/guide/init-structure/requirements_guide.md` | merged_then_deleted | 粒度过细，但保留了 gate 边界信息 | 删除 | 关键要求已并入 `guides/workspace-layout.md` |
+| `archive/legacy-2026-04/ideas.md` | merged_then_deleted | 旧草稿副本 | 删除 | 当前草稿入口为 `docs/note/ideas.md` |
 
 ## Content Findings
 
@@ -86,6 +86,13 @@
 - `.phasegate/design/` 与 `.phasegate/tasks/` 的口径冲突，是旧文档中最明确的事实错误。
 - `design/04_product_roadmap.md` 对“自动阶段推进未完成”的判断已过时。
 - `guide/acceptance-guide.md` 的标题、阶段编号和正文边界都不稳定，不应恢复使用。
+
+## Cleanup Result
+
+- `archive/legacy-2026-04/` 中剩余旧稿已全部删除。
+- `guides/workspace-layout.md` 已吸收 `requirements_guide.md` 中仍有价值的 Phase 0 gate 边界。
+- `guides/workspace-layout.md` 已补充 `config_guide.md` 中仍有价值且与当前代码一致的配置结构说明。
+- 当前 `archive/` 目录应保持为空，后续只有在确有追溯价值时才临时使用。
 
 ## Residual Risks
 

@@ -6,6 +6,7 @@ export type ExecutablePhaseId = Exclude<PhaseId, 0>;
 export interface PhaseExecutionResult {
   phase: ExecutablePhaseId;
   phase3Results?: ModuleRunResult[];
+  output?: string;
 }
 
 export type PhaseStopReason = 'gate_failed' | 'terminal';

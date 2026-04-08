@@ -3,43 +3,41 @@
 - Type: guide
 - Status: active
 - Reader: both
-- Use when: 需要做 Phase 4/5 人工检查，或核对当前实现是否达到可交付状态时
-- Source of truth: 是
-- Update when: review / acceptance 流程、关键检查项或命令变化时
 
-## Purpose
+## Phase 4 Review
 
-保留最有价值的人工检查入口，去掉过长且易过时的细节清单。
+Phase 4 reviews only modules that completed successfully in Phase 3.
 
-## Scope
+Primary inputs:
 
-包含：人工 review 的最小检查项、Acceptance 前置条件、建议顺序。
+- `.phasegate/progress.json`
+- `.phasegate/tasks/*.md`
+- `.phasegate/contracts/*.md`
+- `.phasegate/scratchpad/{module}/report.json`
+- `.phasegate/scratchpad/summaries/phase-3-summary.md`
 
-不包含：历史版长表格、自定义项目级验收标准。
+Gate behavior:
 
-## Before Acceptance
+- the review output must produce a PASS verdict
+- runtime persists `phase-4-summary.md` under `scratchpad/summaries/`
 
-- `npm install`
-- `npx tsc --noEmit`
-- `npm test`
-- 必要时执行 `PHASEGATE_LIVE=1 npm run test:live`
+## Phase 5 Acceptance
 
-## Review Focus
+Phase 5 verifies the active requirement's acceptance criteria and produces `acceptance-guide.md`.
 
-- 命令是否能在正确 phase 下运行
-- `progress.json` 与 `progress.md` 是否同步
-- `.phasegate/tasks/` 与 `.phasegate/contracts/` 是否能支撑 Phase 2 / 3
-- Phase 3 失败模块是否会阻断下游模块
-- `review <module>` 是否能对指定模块工作
+Primary inputs:
 
-## Acceptance Notes
+- active requirement file
+- `progress.json`
+- worker reports
+- phase summaries under `scratchpad/summaries/`
 
-- 当前 Phase 4 gate 依赖 `progress.md` 中存在 `## Phase 4 Summary`
-- 当前 Phase 5 更接近“最后一轮 prompt 驱动检查”，不是完整工单系统
-- 如果需要项目级验收模板，应在具体项目中单独维护，不放回通用主文档
+## Notes
+
+- There is no `progress.md` review gate in the current model.
+- Review and acceptance still require human judgment even when automated checks pass.
 
 ## Related
 
-- [`testing.md`](./testing.md)
-- [`../core/workflow-phases.md`](../core/workflow-phases.md)
-- [`../core/progress-model.md`](../core/progress-model.md)
+- [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)
+- [progress-model.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/progress-model.md)

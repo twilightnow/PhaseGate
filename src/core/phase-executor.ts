@@ -4,9 +4,9 @@ import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createRunner, type IAiRunner } from './ai-runner';
 import { ConstraintChecker } from './constraint-checker';
-import { detectLocale } from './phase-gate';
+import { buildLocalLanguageInstruction } from './phase-gate';
 import { Orchestrator, type ModuleRunResult } from './orchestrator';
-import type { PhaseId } from '../types';
+import { ProgressManager } from './progress-manager';
 import type { ExecutablePhaseId, PhaseExecutionResult } from './phase-runtime';
 import type { RunnerScope } from './ai-runner';
 
@@ -17,13 +17,6 @@ const PHASE_META: Record<number, { title: string; promptFile: string }> = {
   2: { title: 'Design Review', promptFile: 'phase2_review.md' },
   4: { title: 'Code Review', promptFile: 'phase4_code_review.md' },
   5: { title: 'Acceptance', promptFile: 'phase5_acceptance.md' },
-};
-
-const LOCALIZED_PROMPT_FILES: Partial<Record<PhaseId, Partial<Record<string, string>>>> = {
-  1: { zh: 'phase1_design_zh.md', ja: 'phase1_design_ja.md' },
-  2: { zh: 'phase2_review_zh.md', ja: 'phase2_review_ja.md' },
-  4: { zh: 'phase4_code_review_zh.md', ja: 'phase4_code_review_ja.md' },
-  5: { zh: 'phase5_acceptance_zh.md', ja: 'phase5_acceptance_ja.md' },
 };
 
 export interface PreparedPhase {
@@ -39,20 +32,22 @@ export interface IPhaseExecutor {
 }
 
 export class PhaseExecutor implements IPhaseExecutor {
+  private readonly progressManager = new ProgressManager();
+
   async prepare(cwd: string, phase: Exclude<ExecutablePhaseId, 3>): Promise<PreparedPhase> {
     const meta = PHASE_META[phase];
     if (!meta) {
       throw new Error(`No runner configured for phase ${phase}.`);
     }
 
-    const promptFile = this.getPromptFileForPhase(phase, meta.promptFile);
-    const promptPath = path.join(PROMPTS_DIR, promptFile);
+    const promptPath = path.join(PROMPTS_DIR, meta.promptFile);
     let prompt: string;
     try {
       prompt = await fse.readFile(promptPath, 'utf-8');
     } catch {
       throw new Error(`Prompt file not found: ${promptPath}`);
     }
+    prompt = this.applyOutputLanguageInstruction(prompt);
 
     const contextFiles = await this.buildPhaseContextFiles(cwd, phase);
     const runner = await createRunner(cwd, this.getRunnerScopeForPhase(phase));
@@ -85,8 +80,7 @@ export class PhaseExecutor implements IPhaseExecutor {
     }
 
     console.log(
-      chalk.cyan('->') +
-        ' Launching Orchestrator for Phase 3 (parallel module development)...'
+      chalk.cyan('->') + ' Launching Orchestrator for Phase 3 (parallel module development)...'
     );
 
     const orchestrator = new Orchestrator();
@@ -95,10 +89,7 @@ export class PhaseExecutor implements IPhaseExecutor {
       this.printOrchestratorResults(results);
       return results;
     } catch (err) {
-      console.error(
-        chalk.red('Orchestrator error:'),
-        err instanceof Error ? err.message : err
-      );
+      console.error(chalk.red('Orchestrator error:'), err instanceof Error ? err.message : err);
       process.exit(1);
     }
   }
@@ -112,7 +103,7 @@ export class PhaseExecutor implements IPhaseExecutor {
 
     console.log(chalk.cyan('->') + ` Running Phase ${phase}: ${meta.title}...`);
 
-    const promptPath = path.join(PROMPTS_DIR, this.getPromptFileForPhase(phase, meta.promptFile));
+    const promptPath = path.join(PROMPTS_DIR, meta.promptFile);
     let prompt: string;
 
     try {
@@ -122,6 +113,7 @@ export class PhaseExecutor implements IPhaseExecutor {
       process.exit(1);
     }
 
+    prompt = this.applyOutputLanguageInstruction(prompt);
     const contextFiles = await this.buildPhaseContextFiles(cwd, phase);
     const spinner = ora(`Phase ${phase}: ${meta.title}...`).start();
 
@@ -133,18 +125,13 @@ export class PhaseExecutor implements IPhaseExecutor {
       console.log(result);
     } catch (err) {
       spinner.fail(`Phase ${phase}: ${meta.title} failed.`);
-      console.error(
-        chalk.red('Runner error:'),
-        err instanceof Error ? err.message : err
-      );
+      console.error(chalk.red('Runner error:'), err instanceof Error ? err.message : err);
       process.exit(1);
     }
   }
 
-  private getPromptFileForPhase(phase: PhaseId, defaultFile: string): string {
-    const locale = detectLocale();
-    const localizedFile = LOCALIZED_PROMPT_FILES[phase]?.[locale];
-    return localizedFile ?? defaultFile;
+  private applyOutputLanguageInstruction(prompt: string): string {
+    return [prompt, '', '---', '', buildLocalLanguageInstruction()].join('\n');
   }
 
   private async buildPhaseContextFiles(
@@ -153,49 +140,66 @@ export class PhaseExecutor implements IPhaseExecutor {
   ): Promise<string[]> {
     const pg = path.join(cwd, '.phasegate');
     const archConstraints = path.join(cwd, 'docs', 'core', 'architecture-constraints.md');
-    const progressMd = path.join(pg, 'progress.md');
     const files: string[] = [];
-
-    if (await fse.pathExists(progressMd)) {
-      files.push(progressMd);
-    }
+    const activeRequirementFiles = await this.getActiveRequirementContextFiles(cwd);
+    const summaryDir = path.join(pg, 'scratchpad', 'summaries');
 
     switch (phase) {
       case 1: {
-        files.push(...(await listMarkdownFiles(path.join(pg, 'requirements'))));
+        files.push(...activeRequirementFiles);
         break;
       }
       case 2: {
         files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
         files.push(...(await listMarkdownFiles(path.join(pg, 'contracts'))));
-        files.push(...(await listMarkdownFiles(path.join(pg, 'requirements'))));
+        files.push(...activeRequirementFiles);
         break;
       }
       case 4: {
+        files.push(path.join(pg, 'progress.json'));
+        files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
         files.push(...(await listMarkdownFiles(path.join(pg, 'contracts'))));
+        files.push(...activeRequirementFiles);
+        if (await fse.pathExists(summaryDir)) {
+          files.push(...(await listMarkdownFiles(summaryDir)));
+        }
+        files.push(...(await this.listWorkerReportFiles(path.join(pg, 'scratchpad'))));
         break;
       }
       case 5: {
-        files.push(...(await listMarkdownFiles(path.join(pg, 'requirements'))));
-        const scratchpadBase = path.join(pg, 'scratchpad');
-        if (await fse.pathExists(scratchpadBase)) {
-          const modules = await fse.readdir(scratchpadBase);
-          for (const mod of modules) {
-            const reportPath = path.join(scratchpadBase, mod, 'report.json');
-            if (await fse.pathExists(reportPath)) {
-              files.push(reportPath);
-            }
-          }
+        files.push(path.join(pg, 'progress.json'));
+        files.push(...activeRequirementFiles);
+        if (await fse.pathExists(summaryDir)) {
+          files.push(...(await listMarkdownFiles(summaryDir)));
         }
+        const scratchpadBase = path.join(pg, 'scratchpad');
+        files.push(...(await this.listWorkerReportFiles(scratchpadBase)));
         break;
       }
     }
 
+    const dedupedFiles = files.filter(Boolean);
+
     if (await fse.pathExists(archConstraints)) {
-      files.push(archConstraints);
+      dedupedFiles.push(archConstraints);
     }
 
-    return files;
+    return Array.from(new Set(dedupedFiles));
+  }
+
+  private async getActiveRequirementContextFiles(cwd: string): Promise<string[]> {
+    const progress = this.progressManager.read(cwd);
+    if (!progress.activeRequirement) {
+      return [];
+    }
+
+    const requirement = progress.requirements.find(
+      (entry) => entry.name === progress.activeRequirement
+    );
+    const fileName = requirement?.file ?? `${progress.activeRequirement}.md`;
+    const requirementPath = path.join(cwd, '.phasegate', 'requirements', fileName);
+
+    return (await fse.pathExists(requirementPath)) ? [requirementPath] : [];
   }
 
   private getRunnerScopeForPhase(phase: Exclude<ExecutablePhaseId, 3>): RunnerScope {
@@ -211,6 +215,24 @@ export class PhaseExecutor implements IPhaseExecutor {
     }
   }
 
+  private async listWorkerReportFiles(scratchpadBase: string): Promise<string[]> {
+    if (!(await fse.pathExists(scratchpadBase))) {
+      return [];
+    }
+
+    const entries = await fse.readdir(scratchpadBase);
+    const reports: string[] = [];
+
+    for (const entry of entries) {
+      const reportPath = path.join(scratchpadBase, entry, 'report.json');
+      if (await fse.pathExists(reportPath)) {
+        reports.push(reportPath);
+      }
+    }
+
+    return reports;
+  }
+
   private printOrchestratorResults(results: ModuleRunResult[]): void {
     console.log('');
     console.log(chalk.bold('Phase 3 Results'));
@@ -222,18 +244,14 @@ export class PhaseExecutor implements IPhaseExecutor {
 
     for (const result of done) {
       console.log(
-        `  ${chalk.green('✓')} ${result.moduleName} (${(result.durationMs / 1000).toFixed(1)}s)`
+        `  ${chalk.green('OK')} ${result.moduleName} (${(result.durationMs / 1000).toFixed(1)}s)`
       );
     }
     for (const result of failed) {
-      console.log(
-        `  ${chalk.red('x')} ${result.moduleName} - ${result.error ?? 'failed'}`
-      );
+      console.log(`  ${chalk.red('x')} ${result.moduleName} - ${result.error ?? 'failed'}`);
     }
     for (const result of blocked) {
-      console.log(
-        `  ${chalk.yellow('!')} ${result.moduleName} - ${result.error ?? 'blocked'}`
-      );
+      console.log(`  ${chalk.yellow('!')} ${result.moduleName} - ${result.error ?? 'blocked'}`);
     }
 
     console.log('');

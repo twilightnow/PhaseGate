@@ -32,13 +32,19 @@ function shouldDisplayTool(event: ToolUseEvent): boolean {
   return !['Read', 'Glob', 'Grep'].includes(event.name);
 }
 
+function formatTextLine(text: string): string | undefined {
+  const line = text.trim();
+  if (!line) return undefined;
+  return `  | ${line}`;
+}
+
 export async function runSinglePhase(
   runner: IAiRunner,
   contextFiles: string[],
   prompt: string,
   phase: number,
   title: string
-): Promise<void> {
+): Promise<string> {
   const spinner = ora(`Phase ${phase}: ${title}...`).start();
   let spinnerStopped = false;
   let completionPrinted = false;
@@ -71,14 +77,26 @@ export async function runSinglePhase(
     }
   };
 
+  const onText = (text: string): void => {
+    const line = formatTextLine(text);
+    if (!line) return;
+    if (!spinnerStopped) {
+      spinner.stop();
+      spinnerStopped = true;
+    }
+    process.stdout.write(line + '\n');
+  };
+
   try {
-    await runner.run(contextFiles, prompt, onEvent);
+    const result = await runner.run(contextFiles, prompt, { onEvent, onText });
 
     if (!spinnerStopped) {
       spinner.succeed(`Phase ${phase}: ${title} complete.`);
     } else if (!completionPrinted) {
       console.log(`${chalk.green('OK')} Phase ${phase}: ${title} complete.`);
     }
+
+    return result;
   } catch (err) {
     if (!spinnerStopped) spinner.stop();
     console.error(chalk.red('Runner error:'), err instanceof Error ? err.message : err);
@@ -92,7 +110,8 @@ export function createRunCommand(): Command {
   cmd
     .description('Drive the current phase (auto-detects from progress.json)')
     .option('--phase <n>', 'override phase to run (0-5)', parseInt)
-    .action(async (options: { phase?: number }) => {
+    .option('--requirement <name>', 'select an approved requirement before running')
+    .action(async (options: { phase?: number; requirement?: string }) => {
       const cwd = process.cwd();
       const pm = new ProgressManager();
       let progress: ProjectProgress;
@@ -109,15 +128,36 @@ export function createRunCommand(): Command {
         process.exit(1);
       }
 
+      progress = pm.syncRequirementsFromWorkspace(cwd);
+
+      if (options.requirement) {
+        try {
+          progress = pm.activateRequirement(cwd, options.requirement);
+        } catch (err) {
+          console.error(chalk.red('Error:'), err instanceof Error ? err.message : err);
+          process.exit(1);
+        }
+      }
+
+      if (!progress.activeRequirement) {
+        console.log(
+          chalk.yellow('!') +
+            ' No active requirement is selected. Use ' +
+            chalk.bold('phasegate select <requirement>') +
+            ' or ' +
+            chalk.bold('phasegate run --requirement <requirement>') +
+            '.'
+        );
+        process.exit(0);
+      }
+
       const forcedPhase = options.phase !== undefined;
-      const requestedPhase = options.phase ?? progress.currentPhase;
+      const requestedPhase = options.phase ?? (progress.currentPhase === 0 ? 1 : progress.currentPhase);
 
       if (requestedPhase === 0) {
         console.log(
           chalk.yellow('!') +
-            ' Phase 0 is an interactive session. Run ' +
-            chalk.bold('phasegate chat') +
-            ' instead.'
+            ' Phase 0 is requirement intake only. Select a requirement and run Phase 1 or later.'
         );
         process.exit(0);
       }
@@ -141,8 +181,14 @@ export function createRunCommand(): Command {
             process.exit(1);
           }
 
-          await runSinglePhase(prepared.runner, prepared.contextFiles, prepared.prompt, phase, prepared.title);
-          executionResult = { phase };
+          const output = await runSinglePhase(
+            prepared.runner,
+            prepared.contextFiles,
+            prepared.prompt,
+            phase,
+            prepared.title
+          );
+          executionResult = { phase, output };
         }
 
         const transition = await transitionManager.resolve(cwd, executionResult);

@@ -1,48 +1,62 @@
-# Phase 1: Design Book Generation
+# Phase 1: Design Generation
 
-## Your Task
+## Goal
 
-Generate module design books and interface contracts for a PhaseGate project.
-This runs non-interactively — complete all tasks, write all files, then output a Phase 1 Summary.
+Generate the active requirement's design output with the smallest change set that can satisfy the requirement.
+This phase runs non-interactively: finish the work, write the files, and return a short summary.
 
----
+## Read First
 
-## Inputs to Read First
+1. The active requirement file injected from `.phasegate/requirements/`
+2. `docs/core/architecture-constraints.md` if provided
+3. The project `README.md` or `README` if it exists
+4. The current `src/` layout if it helps you fit the design into the existing codebase
 
-Before generating anything, read the following:
+## Minimal Delivery Decision
 
-1. All files in `.phasegate/requirements/` — the confirmed requirements
-2. `.phasegate/progress.md` — current project state (already injected as context)
-3. `docs/03_architecture_constraints.md` — architecture rules (already injected as context)
-4. Scan the project's `src/` directory structure to understand existing layout
+Before writing any design file, decide whether the requirement is a minimal delivery task.
+Treat the requirement as minimal delivery when it is primarily:
 
----
+- content addition
+- copy or text updates
+- configuration adjustment
+- static asset addition
+- a small single-surface change that fits the existing structure
 
-## Steps
+If minimal delivery applies:
 
-1. Parse all requirements files. Identify the distinct modules needed.
-2. For each module, create `.phasegate/tasks/{module-name}.md` using the Module Design Book Template below.
-3. Identify every cross-module interface. For each, create `.phasegate/contracts/{InterfaceName}.md` using the Contract Template below.
-4. Append a Phase 1 Summary block to `.phasegate/progress.md`.
+- prefer one task book only
+- do not invent extra modules just to make the work look more engineered
+- do not create contracts unless cross-module coordination is truly required
+- explain briefly why the existing structure can carry the change
 
----
+Content additions, copy updates, config changes, and static asset work must not be auto-upgraded into module decomposition, contract extraction, or architecture cleanup.
 
-## Module Design Book Template
+## Required Outputs
 
-```markdown
+Write these files only:
+
+- `.phasegate/tasks/{module-name}.md`
+- `.phasegate/contracts/{InterfaceName}.md` when a real cross-module contract is required
+
+Do not write `.phasegate/progress.md` or any other progress log yourself. Runtime state is managed by the CLI.
+
+## Design Book Template
+
+````markdown
 # {ModuleName}
 
 ## Responsibility
-{one sentence: what this module does and nothing else}
+{one sentence describing exactly one concern}
 
 ## Out of Scope
-- {things this module explicitly does NOT do}
+- {things this module explicitly does not do}
 
 ## File Structure
 src/{module-name}/
-├── index.ts      # public exports only, no logic
-├── service.ts    # business logic
-└── types.ts      # types local to this module
+- index.ts
+- service.ts
+- types.ts
 
 ## Dependencies
 | Interface | Direction |
@@ -51,22 +65,20 @@ src/{module-name}/
 
 ## Constraints
 - Max 500 lines per file
-- No direct import of other modules' internal files
+- No cross-module internal imports
 - All exported symbols must be typed
 
 ## Test Requirements
-- Coverage ≥ 80%
-- Must cover: {list key scenarios from requirements}
-```
+- Coverage >= 80%
+- Must cover: {key requirement scenarios}
+````
 
----
+## Contract Template
 
-## Interface Contract Template
-
-```markdown
+````markdown
 ---
 name: {InterfaceName}
-description: {one sentence describing this interface's purpose — must be semantically specific enough for the orchestrator to decide which modules need it}
+description: {specific interface purpose}
 consumers:
   - {ModuleName}
 ---
@@ -77,11 +89,11 @@ consumers:
 draft
 
 ## Definition
-\`\`\`typescript
+```typescript
 interface {InterfaceName} {
   method(param: Type): ReturnType;
 }
-\`\`\`
+```
 
 ## Provider
 - {ModuleName}
@@ -90,46 +102,29 @@ interface {InterfaceName} {
 - {ModuleName}
 
 ## Change Rule
-Once finalized, changes require notifying all Consumers and re-running Phase 2 review.
-```
+Once finalized, changes require notifying all consumers and re-running Phase 2 review.
+````
 
-Strict formatting rules for every contract file:
-- Use exactly the frontmatter fields shown above: `name`, `description`, `consumers`
-- Do NOT add extra frontmatter keys such as `status`, `version`, `provider`, or `providers`
-- `## Status` must be a single plain-text line containing exactly `draft`
-- Do NOT use bullets, tables, YAML, or metadata under `## Status`
-- `## Provider` must remain a markdown body section, not a frontmatter field
-- Keep all headings exactly as shown in the template
+## Contract Rules
 
----
+- Frontmatter keys must be exactly `name`, `description`, `consumers`
+- Do not add extra frontmatter keys
+- `## Status` must be the single line `draft`
+- Keep `## Provider`, `## Consumers`, and `## Change Rule` as body sections
 
-## Phase 1 Summary Format
+## Completion Checklist
 
-Append this block to `.phasegate/progress.md`:
+- Every required module has a task book in `.phasegate/tasks/`
+- Every cross-module interface has a contract in `.phasegate/contracts/`
+- Each contract frontmatter has a meaningful `description`
+- Each contract frontmatter lists the correct `consumers`
+- If this is minimal delivery, the output must stay minimal and explain why contracts were unnecessary
 
-```markdown
-## Phase 1 Summary
+## Final Response
 
-### Current State
-Generated design books: .phasegate/tasks/module-a.md, ...
-Generated contracts: .phasegate/contracts/IFoo.md, ...
+Return a short summary with:
 
-### Key Decisions
-- {key design decisions made}
-
-### Outputs
-- .phasegate/tasks/: {N} module design books
-- .phasegate/contracts/: {N} interface contracts
-
-### Notes for Phase 2
-- {things to focus on during review}
-```
-
----
-
-## Gate Conditions (verify before finishing)
-
-- [ ] Every identified module has a `.phasegate/tasks/{module-name}.md`
-- [ ] Every cross-module interface has a `.phasegate/contracts/{InterfaceName}.md` with frontmatter
-- [ ] The `consumers` field in each contract frontmatter is filled
-- [ ] Phase 1 Summary has been appended to `.phasegate/progress.md`
+- whether Minimal Delivery Mode was used
+- modules created
+- contracts created
+- any assumptions that Phase 2 should review carefully

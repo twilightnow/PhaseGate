@@ -3,86 +3,38 @@
 - Type: core
 - Status: active
 - Reader: both
-- Use when: 需要确认 CLI 命令面、职责边界和关键内部调用链时
-- Source of truth: 是
-- Update when: 命令集合、参数、输出物或调用链发生变化时
+- Use when: you need command-level behavior
 
-## Purpose
+## Commands
 
-总结当前对外 CLI 命令及其关键内部职责。
+- `phasegate init`
+  - Creates `.phasegate/`
+  - Creates `requirements/`, `tasks/`, `contracts/`, `scratchpad/`, `archive/`
+  - Writes `progress.json` and `phasegate.config.json`
+- `phasegate chat`
+  - Runs Phase 0 requirement discussion
+  - Approves requirement docs after the Phase 0 gate passes
+- `phasegate select <requirement>`
+  - Selects one approved requirement for execution
+- `phasegate run`
+  - Executes the active requirement from the current phase
+  - `--requirement <name>` selects and runs in one command
+  - `--phase <n>` forces a specific phase
+- `phasegate status`
+  - Prints a readable execution overview from `progress.json`
+- `phasegate progress`
+  - Prints the raw structured `progress.json` state
+- `phasegate review <module>`
+  - Runs focused review for a specific module
 
-## Scope
+## Notes
 
-包含：命令列表、每个命令的主要职责、关键读写文件、scope 级 AI 路由入口。
-
-不包含：交互 prompt 正文、测试矩阵、历史设计讨论。
-
-## Registered Commands
-
-- `init`
-- `status`
-- `run`
-- `review`
-- `chat`
-- `progress`
-
-CLI 入口：`src/index.ts`
-
-## Command Summary
-
-### `phasegate init`
-
-- 初始化 `.phasegate/` 工作区
-- 创建 `requirements/`、`tasks/`、`contracts/`
-- 生成 `requirements.md`
-- 写入初始 `progress.json`、`progress.md`、`phasegate.config.json`
-- 默认生成 `aiProfiles` / `aiRouting`，启用 scope-based AI routing
-
-### `phasegate chat`
-
-- 只用于 Phase 0
-- 按 locale 选择需求讨论 prompt
-- 会话结束后立即执行 Phase 0 gate
-- runner scope：`chat`
-
-### `phasegate run`
-
-- 默认读取 `progress.json.currentPhase`
-- `--phase <n>` 可强制执行指定阶段
-- Phase 1 / 2 / 4 / 5 为 prompt 驱动阶段
-- Phase 3 走 `Orchestrator`
-- Phase 1 / 2 / 4 / 5 分别使用 `phase1` / `phase2` / `phase4` / `phase5` scope
-- Phase 3 先使用 `phase3.coordinator` 生成 coordination brief，再使用 `phase3.worker` 并行 fork worker
-
-### `phasegate status`
-
-- 读取 `progress.json`
-- 输出当前阶段和模块状态摘要
-
-### `phasegate progress`
-
-- 展示 `progress.md`
-
-### `phasegate review <module>`
-
-- 对指定模块做补充检查或重试相关流程
-- runner scope：`phase4`
-
-## Key Internal Chain
-
-- `run` -> `PhaseExecutor`
-- `run` -> `PhaseTransitionManager`
-- `Phase 3` -> `Orchestrator`
-- `createRunner(projectRoot, scope)` -> `scope -> profile -> adapter`
-- 所有状态写回 -> `ProgressManager`
+- `progress.json` is the only state authority.
+- There is no CLI command that displays or maintains `progress.md`.
+- Phase 3 uses the orchestrator directly; other phases use prompt-based execution.
 
 ## Related
 
-- [`workflow-phases.md`](./workflow-phases.md)
-- [`progress-model.md`](./progress-model.md)
-- [`ai-routing.md`](./ai-routing.md)
-- [`../guides/getting-started.md`](../guides/getting-started.md)
-- `src/index.ts`
-- `src/commands/init.ts`
-- `src/commands/chat.ts`
-- `src/commands/run.ts`
+- [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)
+- [getting-started.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/getting-started.md)
+- [index.ts](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/src/index.ts)

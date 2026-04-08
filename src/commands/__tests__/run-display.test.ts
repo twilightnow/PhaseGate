@@ -6,14 +6,26 @@
  */
 
 import { runSinglePhase } from '../run';
-import type { IAiRunner } from '../../core/ai-runner';
+import type { IAiRunner, RunHooks } from '../../core/ai-runner';
 import type { RunEvent } from '../../types';
 
-function makeRunner(events: RunEvent[]): IAiRunner {
+function makeRunner(events: RunEvent[], textLines: string[] = []): IAiRunner {
   return {
-    run: jest.fn(async (_files: string[], _prompt: string, onEvent?: (e: RunEvent) => void) => {
-      if (onEvent) {
-        for (const event of events) onEvent(event);
+    capabilities: jest.fn(() => ({
+      runStreaming: 'event',
+      forkStreaming: 'text',
+      interactiveChat: true,
+      structuredWorkerReport: true,
+    })),
+    run: jest.fn(async (_files: string[], _prompt: string, hooks?: RunHooks | ((e: RunEvent) => void)) => {
+      const normalizedHooks: RunHooks =
+        typeof hooks === 'function' ? { onEvent: hooks } : hooks ?? {};
+
+      if (normalizedHooks.onEvent) {
+        for (const event of events) normalizedHooks.onEvent(event);
+      }
+      if (normalizedHooks.onText) {
+        for (const line of textLines) normalizedHooks.onText(line);
       }
       return '';
     }),
@@ -22,7 +34,7 @@ function makeRunner(events: RunEvent[]): IAiRunner {
   } as unknown as IAiRunner;
 }
 
-function captureOutput(fn: () => Promise<void>): Promise<string[]> {
+function captureOutput(fn: () => Promise<unknown>): Promise<string[]> {
   const lines: string[] = [];
   const origStdoutWrite = process.stdout.write.bind(process.stdout);
   const origStderrWrite = process.stderr.write.bind(process.stderr);
@@ -189,18 +201,31 @@ describe('runSinglePhase - Claude runner with tool events', () => {
 });
 
 describe('runSinglePhase - Gemini/Codex runner (silent degradation)', () => {
-  it('emits no tool-use lines when runner does not call onEvent', async () => {
+  it('prints text lines when runner emits plain text instead of structured events', async () => {
     const geminiRunner: IAiRunner = {
-      run: jest.fn(async () => 'gemini output'),
+      capabilities: jest.fn(() => ({
+        runStreaming: 'text',
+        forkStreaming: 'none',
+        interactiveChat: true,
+        structuredWorkerReport: false,
+      })),
+      run: jest.fn(async (_files, _prompt, hooks?: RunHooks | ((e: RunEvent) => void)) => {
+        if (hooks && typeof hooks !== 'function') {
+          hooks.onText?.('planning');
+          hooks.onText?.('writing files');
+        }
+        return 'gemini output';
+      }),
       fork: jest.fn(),
       chat: jest.fn(),
     } as unknown as IAiRunner;
 
     const lines = await captureOutput(() => runSinglePhase(geminiRunner, [], 'prompt', 2, 'Design Review'));
     const plain = lines.map(stripAnsi);
-    const toolLines = plain.filter((line) => line.trim().match(/^[+~$*=.]/));
+    const textLines = plain.filter((line) => line.includes('|'));
 
-    expect(toolLines).toHaveLength(0);
+    expect(textLines).toContain('  | planning');
+    expect(textLines).toContain('  | writing files');
     expect(plain.some((line) => line.includes('Phase 2') && line.includes('complete'))).toBe(true);
   });
 });

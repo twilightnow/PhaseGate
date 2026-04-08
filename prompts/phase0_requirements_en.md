@@ -10,8 +10,11 @@ Your goal: help the user clarify and document their feature requirements before 
 ## Before You Start
 
 1. Check `.phasegate/requirements/` for any existing `.md` files.
-2. If files exist, read them. Use their content as context — do not re-ask things already recorded.
-3. If the directory is empty, start the discussion from scratch.
+2. If files exist, read them. Use their content as context; do not re-ask things already recorded.
+3. If a root-level `README.md` or `README` exists, read it for high-level project context and existing structure constraints. If it does not exist, skip it without blocking the discussion.
+4. If helpful, lightly inspect `package.json` or the top-level `src/` structure to avoid suggestions that clearly conflict with the existing project shape. If they do not exist, skip them.
+5. If the directory is empty, start the discussion from scratch, but avoid over-assuming internal project details.
+6. On Windows PowerShell, read markdown and text files with an explicit UTF-8 flag such as `Get-Content -Encoding UTF8` to avoid mojibake.
 
 ---
 

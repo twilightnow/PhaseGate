@@ -3,8 +3,9 @@ import * as fse from 'fs-extra';
 import type { WorkerReport, ModuleRunStatus } from '../types';
 import { ProgressManager } from './progress-manager';
 import { DependencyGraph, type ModuleNode } from './dependency-graph';
-import type { IAiRunner } from './ai-runner';
+import type { IAiRunner, RunHooks } from './ai-runner';
 import { createRunner } from './ai-runner';
+import { buildLocalLanguageInstruction } from './phase-gate';
 
 export interface ModuleRunResult {
   moduleName: string;
@@ -15,20 +16,8 @@ export interface ModuleRunResult {
 }
 
 export interface IOrchestrator {
-  /**
-   * Full Phase 3 execution with breakpoint resume.
-   * Reads progress.json, skips done modules, forks workers wave by wave.
-   */
   run(projectRoot: string): Promise<ModuleRunResult[]>;
-  /**
-   * Phase 5A self-correction loop: re-fork a failed module.
-   * Injects failure context into the prompt. Retries up to MAX_RETRIES times.
-   */
-  retry(
-    projectRoot: string,
-    moduleName: string,
-    failureContext: string
-  ): Promise<ModuleRunResult>;
+  retry(projectRoot: string, moduleName: string, failureContext: string): Promise<ModuleRunResult>;
 }
 
 const MAX_RETRIES = 3;
@@ -45,12 +34,9 @@ export class Orchestrator implements IOrchestrator {
     const runner = await createRunner(projectRoot, 'phase3.worker');
     const progress = this.pm.read(projectRoot);
 
-    // Build full DAG
     const allNodes = await this.dg.build(projectRoot);
-
     await this.generateCoordinatorBrief(projectRoot, allNodes, coordinatorRunner);
 
-    // Register any DAG module not yet in progress.modules (defensive)
     let dirty = false;
     for (const node of allNodes) {
       if (!progress.modules.find((m) => m.name === node.name)) {
@@ -60,10 +46,7 @@ export class Orchestrator implements IOrchestrator {
     }
     if (dirty) this.pm.write(projectRoot, progress);
 
-    // Breakpoint resume: skip already-done modules
-    const doneModules = new Set(
-      progress.modules.filter((m) => m.status === 'done').map((m) => m.name)
-    );
+    const doneModules = new Set(progress.modules.filter((m) => m.status === 'done').map((m) => m.name));
     const pendingNodes = allNodes.filter((n) => !doneModules.has(n.name));
 
     const waves = this.dg.getExecutionWaves(pendingNodes);
@@ -72,12 +55,10 @@ export class Orchestrator implements IOrchestrator {
 
     for (let waveIndex = 0; waveIndex < waves.length; waveIndex++) {
       const wave = waves[waveIndex];
-      console.log(
-        `Wave ${waveIndex + 1}/${waves.length}: ${wave.map((node) => node.name).join(', ')}`
-      );
-      // Fork all modules in this wave concurrently (Don't peek / Don't race)
+      console.log(`Wave ${waveIndex + 1}/${waves.length}: ${wave.map((node) => node.name).join(', ')}`);
+
       const waveResults = await Promise.all(
-        wave.map((node) => this._runModule(projectRoot, node, failedModules, undefined, runner))
+        wave.map((node) => this.runModule(projectRoot, node, failedModules, undefined, runner))
       );
 
       for (const result of waveResults) {
@@ -86,13 +67,8 @@ export class Orchestrator implements IOrchestrator {
           this.pm.markModuleDone(projectRoot, result.moduleName);
         } else if (result.status === 'failed') {
           failedModules.add(result.moduleName);
-          this.pm.markModuleFailed(
-            projectRoot,
-            result.moduleName,
-            result.error ?? 'unknown error'
-          );
+          this.pm.markModuleFailed(projectRoot, result.moduleName, result.error ?? 'unknown error');
         }
-        // blocked status is recorded inside _runModule
       }
     }
 
@@ -120,7 +96,7 @@ export class Orchestrator implements IOrchestrator {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       const prompt = buildRetryPrompt(moduleName, node, failureContext, attempt);
       const failedModules = new Set<string>();
-      const result = await this._runModule(projectRoot, node, failedModules, prompt, runner);
+      const result = await this.runModule(projectRoot, node, failedModules, prompt, runner);
 
       if (result.status === 'done') {
         this.pm.markModuleDone(projectRoot, moduleName);
@@ -133,16 +109,13 @@ export class Orchestrator implements IOrchestrator {
     return { moduleName, status: 'failed', durationMs: 0, error: finalError };
   }
 
-  // ── private ────────────────────────────────────────────────────────────────
-
-  private async _runModule(
+  private async runModule(
     projectRoot: string,
     node: ModuleNode,
     failedModules: Set<string>,
     overridePrompt?: string,
     runner?: IAiRunner
   ): Promise<ModuleRunResult> {
-    // Block if any dependency failed
     const blockedBy = node.dependencies.find((dep) => failedModules.has(dep));
     if (blockedBy) {
       this.pm.markModuleBlocked(projectRoot, node.name, blockedBy);
@@ -168,26 +141,30 @@ export class Orchestrator implements IOrchestrator {
     const startMs = Date.now();
     const timeoutMs = getWorkerTimeoutMs();
     console.log(`  -> ${node.name} started`);
+    const hooks: RunHooks = {
+      onText: (text) => {
+        const line = text.trim();
+        if (!line) return;
+        console.log(`    [${node.name}] ${line}`);
+      },
+    };
 
     try {
       const activeRunner = runner ?? (await createRunner(projectRoot));
       const report = await withTimeout(
-        activeRunner.fork(contextFiles, prompt),
+        activeRunner.fork(contextFiles, prompt, hooks),
         timeoutMs,
         `worker timeout after ${formatDuration(timeoutMs)}`
       );
       const durationMs = Date.now() - startMs;
 
-      // Persist report to scratchpad (don't peek was satisfied — process done)
       await fse.writeFile(
         path.join(scratchpadPath, 'report.json'),
         JSON.stringify(report, null, 2),
         'utf-8'
       );
 
-      console.log(
-        `  ${report.result === 'done' ? '✓' : 'x'} ${node.name} ${report.result} (${formatDuration(durationMs)})`
-      );
+      console.log(`  ${report.result === 'done' ? 'OK' : 'x'} ${node.name} ${report.result} (${formatDuration(durationMs)})`);
 
       return {
         moduleName: node.name,
@@ -230,11 +207,20 @@ export class Orchestrator implements IOrchestrator {
   private async buildCoordinatorContextFiles(projectRoot: string): Promise<string[]> {
     const pg = path.join(projectRoot, '.phasegate');
     const archConstraints = path.join(projectRoot, ARCH_CONSTRAINTS_REL);
-    const progressMd = path.join(pg, 'progress.md');
     const files: string[] = [];
-
-    if (await fse.pathExists(progressMd)) {
-      files.push(progressMd);
+    const progress = this.pm.read(projectRoot);
+    if (progress.activeRequirement) {
+      const activeRequirement = progress.requirements.find(
+        (entry) => entry.name === progress.activeRequirement
+      );
+      const requirementPath = path.join(
+        pg,
+        'requirements',
+        activeRequirement?.file ?? `${progress.activeRequirement}.md`
+      );
+      if (await fse.pathExists(requirementPath)) {
+        files.push(requirementPath);
+      }
     }
 
     files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
@@ -248,8 +234,6 @@ export class Orchestrator implements IOrchestrator {
   }
 }
 
-// ── prompt builders ───────────────────────────────────────────────────────────
-
 function buildWorkerPrompt(node: ModuleNode, scratchpadPath: string): string {
   const contractList =
     node.contractFiles.length > 0
@@ -260,26 +244,28 @@ function buildWorkerPrompt(node: ModuleNode, scratchpadPath: string): string {
     `Implement module: ${node.name}`,
     `Design file: ${node.designFile}`,
     contractList,
-    `When complete, output a WorkerReport in this exact markdown format:`,
-    ``,
-    `## Scope`,
-    `{module name} — {one-line responsibility}`,
-    ``,
-    `## Result`,
-    `done`,
-    ``,
-    `## Key Files`,
-    `- {path to each key file}`,
-    ``,
-    `## Files Changed`,
-    `- {all files changed}`,
-    ``,
-    `## Issues`,
-    `(none)`,
-    ``,
+    buildLocalLanguageInstruction(),
+    '',
+    'When complete, output a WorkerReport in this exact markdown format:',
+    '',
+    '## Scope',
+    '{module name} - {one-line responsibility}',
+    '',
+    '## Result',
+    'done',
+    '',
+    '## Key Files',
+    '- {path to each key file}',
+    '',
+    '## Files Changed',
+    '- {all files changed}',
+    '',
+    '## Issues',
+    '(none)',
+    '',
     `Scratchpad directory (for intermediate files only): ${scratchpadPath}`,
   ]
-    .filter((l) => l !== undefined)
+    .filter((line) => line !== undefined)
     .join('\n');
 }
 
@@ -289,6 +275,7 @@ function buildCoordinatorPrompt(nodes: ModuleNode[], scratchpadPath: string): st
   return [
     'You are the Phase 3 coordinator for PhaseGate.',
     'Review the current module plan and produce a concise execution brief for the orchestrator and workers.',
+    buildLocalLanguageInstruction(),
     '',
     'Modules in scope:',
     moduleList,
@@ -315,23 +302,25 @@ function buildRetryPrompt(
 ): string {
   return [
     `Retry attempt ${attempt}/${MAX_RETRIES} for module: ${moduleName}`,
-    ``,
-    `Previous failure context:`,
+    '',
+    'Previous failure context:',
     failureContext,
-    ``,
+    '',
     `Design file: ${node.designFile}`,
     node.contractFiles.length > 0
       ? `Contracts:\n${node.contractFiles.map((c) => `  - ${c}`).join('\n')}`
       : '',
-    ``,
-    `Fix the reported issues and output a WorkerReport when done (same format as before).`,
+    '',
+    buildLocalLanguageInstruction(),
+    '',
+    'Fix the reported issues and output a WorkerReport when done (same format as before).',
   ]
     .filter(Boolean)
     .join('\n');
 }
 
 function getWorkerTimeoutMs(): number {
-  const raw = process.env['PHASEGATE_WORKER_TIMEOUT_MS'];
+  const raw = process.env.PHASEGATE_WORKER_TIMEOUT_MS;
   if (!raw) return DEFAULT_WORKER_TIMEOUT_MS;
 
   const parsed = Number(raw);

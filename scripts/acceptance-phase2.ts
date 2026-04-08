@@ -36,15 +36,18 @@ async function runCliAcceptance(sandboxRoot: string): Promise<void> {
   const projectRoot = path.join(sandboxRoot, 'my-project');
   await fse.ensureDir(projectRoot);
 
-  const initOutput = runCli(projectRoot, ['init']);
+  const initOutput = runCli(projectRoot, ['init', '--adapter', 'codex']);
   assert.match(initOutput, /initialized/i);
+  assert.match(initOutput, /default AI adapter:\s+Codex/i);
+  assert.match(initOutput, /\.phasegate\/phasegate\.config\.json/);
 
   const expectedEntries = [
     'contracts',
     'phasegate.config.json',
     'progress.json',
-    'progress.md',
+    'archive',
     'requirements',
+    'scratchpad',
     'tasks',
   ];
   const actualEntries = (await fse.readdir(path.join(projectRoot, '.phasegate'))).sort();
@@ -53,22 +56,48 @@ async function runCliAcceptance(sandboxRoot: string): Promise<void> {
   const progressJson = await fse.readJson(path.join(projectRoot, '.phasegate', 'progress.json'));
   assert.strictEqual(progressJson.projectName, 'my-project');
   assert.strictEqual(progressJson.currentPhase, 0);
-  assert.strictEqual(
-    await fse.pathExists(
-      path.join(projectRoot, '.phasegate', 'requirements', 'requirements.md')
-    ),
-    true
+  assert.strictEqual(progressJson.activeRequirement, null);
+  const configJson = await fse.readJson(path.join(projectRoot, '.phasegate', 'phasegate.config.json'));
+  assert.strictEqual(configJson.runner, 'codex');
+  assert.strictEqual(configJson.aiProfiles.default.adapter, 'codex');
+  assert.deepStrictEqual(
+    (await fse.readdir(path.join(projectRoot, '.phasegate', 'requirements'))).sort(),
+    []
   );
 
   const statusOutput = runCli(projectRoot, ['status']);
   assert.match(statusOutput, /Phase 0/i);
   assert.match(statusOutput, /my-project/);
+  assert.match(statusOutput, /Active requirement:\s+\(none\)/i);
 
   const progressOutput = runCli(projectRoot, ['progress']);
-  assert.match(progressOutput, /<!-- ====================/);
-  assert.match(progressOutput, /Phase Summary/);
+  assert.match(progressOutput, /"projectName": "my-project"/);
+  assert.match(progressOutput, /"currentPhase": 0/);
+  assert.match(progressOutput, /"activeRequirement": null/);
   assert.match(progressOutput, /my-project/);
-  assert.match(progressOutput, /Phase 0/);
+
+  const claudeProjectRoot = path.join(sandboxRoot, 'my-project-claude');
+  await fse.ensureDir(claudeProjectRoot);
+  const claudeInitOutput = runCli(claudeProjectRoot, ['init', '--adapter', 'claude-code']);
+  assert.match(claudeInitOutput, /default AI adapter:\s+Claude Code/i);
+  const claudeConfigJson = await fse.readJson(
+    path.join(claudeProjectRoot, '.phasegate', 'phasegate.config.json')
+  );
+  assert.strictEqual(claudeConfigJson.runner, 'claude');
+  assert.strictEqual(claudeConfigJson.aiProfiles.default.adapter, 'claude-code');
+
+  const invalidProjectRoot = path.join(sandboxRoot, 'my-project-invalid');
+  await fse.ensureDir(invalidProjectRoot);
+  assert.throws(
+    () => runCli(invalidProjectRoot, ['init', '--adapter', 'bad']),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Unsupported adapter "bad"/);
+      assert.doesNotMatch(err.message, /src[\\/]+commands[\\/]+init\.ts/);
+      return true;
+    }
+  );
+  assert.strictEqual(await fse.pathExists(path.join(invalidProjectRoot, '.phasegate')), false);
 }
 
 async function runDependencyGraphAcceptance(sandboxRoot: string): Promise<void> {
