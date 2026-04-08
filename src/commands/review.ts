@@ -8,7 +8,7 @@ export function createReviewCommand(): Command {
   const cmd = new Command('review');
 
   cmd
-    .description('Run independent AI review on a module task document')
+    .description('Run a lightweight final review for a specific module (Phase 4 gate scope)')
     .argument('<module>', 'module name (matches .phasegate/tasks/{module}.md)')
     .action(async (moduleName: string) => {
       const cwd = process.cwd();

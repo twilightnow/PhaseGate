@@ -169,13 +169,21 @@ export function createRunCommand(): Command {
       while (true) {
         let executionResult;
 
-        if (phase === 3) {
+        if (phase === 2) {
+          // Phase 2 has been folded into Phase 1 — skip AI entirely
+          console.log(
+            chalk.yellow('!') + ' Phase 2 (Design Review) has been folded into Phase 1.\n' +
+            '  Design self-check constraints are now embedded in the Phase 1 prompt.\n' +
+            '  Skipping Phase 2 AI execution. Transition manager will advance to Phase 3.'
+          );
+          executionResult = { phase: 2 as ExecutablePhaseId, output: 'phase2_migrated' };
+        } else if (phase === 3) {
           executionResult = await executor.execute(cwd, 3);
         } else {
           console.log(chalk.cyan('->') + ` Running Phase ${phase}...`);
           let prepared;
           try {
-            prepared = await executor.prepare(cwd, phase as Exclude<ExecutablePhaseId, 3>);
+            prepared = await executor.prepare(cwd, phase as Exclude<ExecutablePhaseId, 2 | 3>);
           } catch (err) {
             console.error(chalk.red('Error:'), err instanceof Error ? err.message : err);
             process.exit(1);

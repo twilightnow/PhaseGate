@@ -1,50 +1,37 @@
-# Phase 4: Code Review
+# Phase 4: Lightweight Final Review Gate
 
 ## Goal
 
-Review the implementation for modules that completed successfully in Phase 3, fix P0 issues when reasonable, run relevant tests, and return a clear PASS or FAIL verdict.
+Perform a **lightweight final review** of the completed modules.
+Your primary input is the **self-review bundle** produced by each worker in Phase 3.
+You are NOT a second implementer; you are a final gate reviewer.
 
 The CLI manages summaries and state transitions. Do not write `.phasegate/progress.md`.
 
-## Determine Scope
+## Input Priority
 
-Use the injected context first:
+1. **Per-module review bundles** (report.json from each done module) — this is your primary input
+2. **Task books** for done modules — verify bundle claims against task book acceptance criteria
+3. **Phase 3 summary** — overview of module execution results
+4. **Contracts** for public surface changes
+5. **Changed source files** — only load selectively when a finding needs deeper inspection
 
-- `.phasegate/progress.json`
-- `.phasegate/scratchpad/summaries/phase-3-summary.md` when available
-- `.phasegate/scratchpad/*/report.json`
-- `.phasegate/tasks/*.md`
-- `.phasegate/contracts/*.md`
+If the review bundles are absent or incomplete, declare `"verdict": "rejected"` with finding:
+"Insufficient review bundle from Phase 3 — re-run Phase 3 with complete self-review output."
+
+## Review Focus
+
+Focus your review on:
+
+- **P0**: Are there any blockers that prevent acceptance? (security, data corruption, complete feature gap)
+- **P1**: Are there significant issues that should be fixed before release?
+- **P2**: Are there minor issues, style concerns, or suggestions?
+
+Do NOT re-implement or re-trace every line of code. Trust the self-review bundle and spot-check key areas.
+
+## Scope
 
 Review only modules that are marked `done`. Skip modules marked `failed` or `blocked`.
-
-## Review Passes
-
-### Pass 1: Design Conformance
-
-For each done module, compare implementation against its task book and contracts.
-
-Check:
-
-- implementation matches `Responsibility`
-- implementation respects `Out of Scope`
-- no file exceeds 500 lines
-- no cross-module internal imports
-- exported symbols are typed
-- contract usage and provided APIs match signatures
-- tests cover required scenarios
-- no skipped or empty tests hide regressions
-
-### Pass 2: Readability and Maintainability
-
-Read the code as if design history did not exist.
-
-Check:
-
-- intent is understandable from the code
-- side effects are explicit
-- errors are handled intentionally
-- change surface is reasonable for future work
 
 ## Fix Rules
 
@@ -53,26 +40,35 @@ Check:
 - Re-run relevant tests after fixes
 - Do not review or modify failed/blocked modules unless a clearly related shared file requires it
 
-## Verdict
+## Output Format
 
-Return one of these exact leading lines:
+After completing your review, output a JSON verdict block:
 
-```text
-PASS
+```json
+{
+  "verdict": "accepted",
+  "reviewedBy": "phase4",
+  "timestamp": "ISO-8601 timestamp",
+  "findings": [
+    {
+      "level": "P0",
+      "description": "Description of finding",
+      "relatedModule": "module-name",
+      "resolved": true
+    }
+  ],
+  "residualRisks": ["any risks accepted and carried forward"],
+  "confidenceLevel": "high"
+}
 ```
 
-or
+`verdict` must be one of: `"accepted"`, `"conditional_pass"`, `"rejected"`.
 
-```text
-FAIL
-```
-
-After the verdict, include a concise review report with:
-
+After the JSON block, include a brief human-readable summary of:
 - reviewed modules
 - tests or validation commands run
 - issues fixed
 - remaining non-P0 issues
 - modules skipped and why
 
-If there are no done modules, return `PASS` and state that nothing was reviewable.
+If there are no done modules, return `"verdict": "accepted"` and state that nothing was reviewable.

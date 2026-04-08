@@ -2,7 +2,9 @@ import * as path from 'path';
 import * as fse from 'fs-extra';
 import { ProgressManager } from './progress-manager';
 import { PhaseArtifactBuilder } from './phase-artifact-builder';
-import type { ContractEntry } from '../types';
+import type { ContractEntry, VerdictRecord } from '../types';
+import { ACTIVE_PHASE_SEQUENCE } from '../types';
+import type { ActivePhaseId } from '../types';
 import type {
   PhaseExecutionResult,
   PhaseTransitionResult,
@@ -10,6 +12,37 @@ import type {
 
 export interface IPhaseTransitionManager {
   resolve(cwd: string, result: PhaseExecutionResult): Promise<PhaseTransitionResult>;
+}
+
+/**
+ * Tries to parse a VerdictRecord from AI output text.
+ * Looks for a JSON code block: ```json { "verdict": "...", "findings": [...] } ```
+ * Returns null if parsing fails (fallback to legacy artifact check).
+ *
+ * Replaces the old getPhase4Verdict (PASS/FAIL keyword matching).
+ */
+export function tryParseVerdict(output: string): VerdictRecord | null {
+  const match = output.match(/```json\s*([\s\S]*?)\s*```/);
+  if (!match) return null;
+  try {
+    const raw = JSON.parse(match[1]);
+    if (
+      typeof raw.verdict === 'string' &&
+      ['accepted', 'conditional_pass', 'rejected'].includes(raw.verdict) &&
+      Array.isArray(raw.findings)
+    ) {
+      return raw as VerdictRecord;
+    }
+  } catch {
+    // parse failed, return null
+  }
+  return null;
+}
+
+function getNextActivePhase(current: ActivePhaseId): ActivePhaseId | null {
+  const idx = ACTIVE_PHASE_SEQUENCE.indexOf(current);
+  if (idx < 0 || idx >= ACTIVE_PHASE_SEQUENCE.length - 1) return null;
+  return ACTIVE_PHASE_SEQUENCE[idx + 1];
 }
 
 export class PhaseTransitionManager implements IPhaseTransitionManager {
@@ -35,41 +68,39 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
 
   private async resolvePhase1(cwd: string): Promise<PhaseTransitionResult> {
     await this.syncPhase1Outputs(cwd);
+
+    // Mark design.reviewPassed = true: Phase 1 embedded design checks completed
+    const progress = this.pm.read(cwd);
+    progress.design.reviewPassed = true;
+    progress.currentPhase = 3;
+    this.pm.write(cwd, progress);
+
     return {
       phase: 1,
-      nextPhase: 2,
+      nextPhase: 3,
       shouldContinue: true,
       stopReason: 'terminal',
-      message: 'OK Phase advanced to 2 (Design Review).',
+      message: 'OK Phase 1 complete. Advancing to Phase 3 (Parallel Module Development).',
     };
   }
 
   private async resolvePhase2(cwd: string): Promise<PhaseTransitionResult> {
-    const passed = await this.checkPhase2Gate(cwd);
+    // Phase 2 has been folded into Phase 1.
+    // The design self-check constraints are now embedded in the Phase 1 prompt.
+    // This phase is treated as a no-op for forward compatibility.
     const progress = this.pm.read(cwd);
-    progress.design.reviewPassed = passed;
-    if (passed) {
-      progress.currentPhase = 3;
-    }
+    progress.currentPhase = 3;
     this.pm.write(cwd, progress);
-
-    if (passed) {
-      return {
-        phase: 2,
-        nextPhase: 3,
-        shouldContinue: true,
-        stopReason: 'terminal',
-        message: 'OK Phase advanced to 3 (Parallel Module Development).',
-      };
-    }
 
     return {
       phase: 2,
-      nextPhase: null,
-      shouldContinue: false,
-      stopReason: 'gate_failed',
+      nextPhase: 3,
+      shouldContinue: true,
+      stopReason: 'terminal',
       message:
-        '! Phase 2 gate not yet passed: not all contracts are finalized. Re-run when the review session is complete.',
+        '! Phase 2 (Design Review) has been folded into Phase 1. ' +
+        'Design self-check constraints are now embedded in Phase 1. ' +
+        'Advancing to Phase 3.',
     };
   }
 
@@ -111,17 +142,67 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
     cwd: string,
     output: string | undefined
   ): Promise<PhaseTransitionResult> {
-    const verdict = getPhase4Verdict(output);
+    // Try to parse VerdictRecord from AI output first
+    const verdict = output ? tryParseVerdict(output) : null;
+
+    if (verdict) {
+      // Record the verdict in progress.json
+      this.pm.recordPhaseVerdict(cwd, 4, verdict);
+
+      if (output) {
+        this.artifacts.writePhase4ReviewOutput(cwd, output);
+      }
+
+      if (verdict.verdict === 'rejected') {
+        return {
+          phase: 4,
+          nextPhase: null,
+          shouldContinue: false,
+          stopReason: 'gate_failed',
+          message: `! Phase 4 gate rejected. P0 findings: ${
+            verdict.findings.filter(f => f.level === 'P0').map(f => f.description).join('; ') || '(none listed)'
+          }`,
+          verdict,
+        };
+      }
+
+      const progress = this.pm.read(cwd);
+      if (verdict.verdict === 'accepted' || verdict.verdict === 'conditional_pass') {
+        this.artifacts.appendPhase4Summary(cwd, progress);
+      }
+      progress.codeReviewPassed = true;
+      progress.currentPhase = 5;
+      this.pm.write(cwd, progress);
+
+      return {
+        phase: 4,
+        nextPhase: 5,
+        shouldContinue: true,
+        stopReason: 'terminal',
+        message: `OK Phase 4 lightweight review passed (verdict: ${verdict.verdict}). Advancing to Phase 5.`,
+        verdict,
+      };
+    }
+
+    // Fallback: legacy artifact-based gate check
+    return this.resolvePhase4Legacy(cwd, output);
+  }
+
+  private async resolvePhase4Legacy(
+    cwd: string,
+    output: string | undefined
+  ): Promise<PhaseTransitionResult> {
+    const legacyVerdict = getLegacyPhase4Verdict(output);
     if (output) {
       this.artifacts.writePhase4ReviewOutput(cwd, output);
     }
 
     const progress = this.pm.read(cwd);
-    if (verdict === 'pass') {
+    if (legacyVerdict === 'pass') {
       this.artifacts.appendPhase4Summary(cwd, progress);
     }
 
-    const passed = verdict === 'pass' && (await this.checkPhase4Gate(cwd));
+    const passed = legacyVerdict === 'pass' && (await this.checkPhase4Gate(cwd));
     progress.codeReviewPassed = passed;
     if (passed) {
       progress.currentPhase = 5;
@@ -209,7 +290,7 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
     progress.design.reviewPassed = false;
     progress.codeReviewPassed = false;
     progress.blockers = [];
-    progress.currentPhase = 2;
+    progress.currentPhase = 1;
 
     this.pm.write(cwd, progress);
   }
@@ -243,7 +324,8 @@ export class PhaseTransitionManager implements IPhaseTransitionManager {
   }
 }
 
-function getPhase4Verdict(output: string | undefined): 'pass' | 'fail' | 'unknown' {
+function getLegacyPhase4Verdict(output: string | undefined): 'pass' | 'fail' | 'unknown' {
+  // Legacy PASS/FAIL keyword matching — used as fallback when tryParseVerdict returns null
   const normalized = output?.trim().toUpperCase() ?? '';
   if (!normalized) {
     return 'unknown';

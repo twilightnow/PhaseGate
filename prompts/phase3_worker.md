@@ -19,9 +19,30 @@ The runtime expects a structured worker report equivalent to:
   "result": "done",
   "keyFiles": ["src/module-name/index.ts"],
   "filesChanged": ["src/module-name/index.ts"],
-  "issues": []
+  "issues": [],
+
+  "implementationSummary": "2-3 sentence description of what was implemented",
+  "changedFiles": ["src/module-name/index.ts"],
+  "testsRun": ["npm test -- src/module-name"],
+  "testSummary": "X tests passed, 0 failed.",
+  "selfReviewFindings": [],
+  "knownRisks": [],
+  "publicSurfaceChanged": false,
+  "recommendedReviewScope": []
 }
 ```
+
+## Self-Review Bundle (Required)
+
+After completing implementation, produce a self-review bundle **before** writing the final report:
+
+1. Run the test commands relevant to your module. Record commands and results.
+2. Compare implementation against the task book: does it meet all acceptance criteria?
+3. List any known gaps, edge cases not handled, or technical debt introduced.
+4. List all files changed, including test files.
+5. State clearly if any public API, exported interface, or shared schema was modified.
+
+Do not omit `implementationSummary`, `changedFiles`, `testsRun`/`testSummary`, `selfReviewFindings`, and `knownRisks`. Phase 4 will treat a missing bundle as insufficient input.
 
 ## Boundaries
 

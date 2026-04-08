@@ -83,7 +83,8 @@ describe('ProgressManager.syncRequirementsFromWorkspace', () => {
     expect(progress.activeRequirement).toBe('feature-a');
     expect(progress.requirements.find((entry) => entry.name === 'feature-a')?.status).toBe('selected');
     expect(progress.requirements.find((entry) => entry.name === 'feature-b')?.status).toBe('approved');
-    expect(progress.currentPhase).toBe(2);
+    // currentPhase 2 is migrated to 1 on normalise
+    expect(progress.currentPhase).toBe(1);
   });
 
   it('writes a generated progress.md snapshot with acceptance tracking', async () => {
@@ -147,5 +148,104 @@ describe('ProgressManager.syncRequirementsFromWorkspace', () => {
     expect(snapshot).toContain('Acceptance criteria recorded: 2');
     expect(snapshot).toContain('recorded: article appears in the list');
     expect(snapshot).toContain('recorded: article detail page is reachable');
+  });
+});
+
+describe('ProgressManager — Phase 2 migration', () => {
+  const manager = new ProgressManager();
+
+  async function makeWorkspace(raw: Record<string, unknown>): Promise<string> {
+    const cwd = await fse.mkdtemp(path.join(os.tmpdir(), 'phasegate-pm-migration-'));
+    await fse.ensureDir(path.join(cwd, '.phasegate', 'requirements'));
+    await fse.writeJson(path.join(cwd, '.phasegate', 'progress.json'), raw, { spaces: 2 });
+    return cwd;
+  }
+
+  afterEach(async () => {
+    const base = os.tmpdir();
+    const entries = await fse.readdir(base);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith('phasegate-pm-migration-'))
+        .map((entry) => fse.remove(path.join(base, entry)))
+    );
+  });
+
+  it('migrates currentPhase: 2 to 1', async () => {
+    const cwd = await makeWorkspace({ currentPhase: 2, projectName: 'test' });
+    const progress = manager.read(cwd);
+    expect(progress.currentPhase).toBe(1);
+  });
+
+  it('records migration in phaseStates', async () => {
+    const cwd = await makeWorkspace({ currentPhase: 2, projectName: 'test' });
+    const progress = manager.read(cwd);
+    const migratedEntry = progress.phaseStates?.find(s => s.phaseId === 2);
+    expect(migratedEntry?.state).toBe('migrated');
+  });
+
+  it('does not throw for progress without phaseStates field', async () => {
+    const cwd = await makeWorkspace({ currentPhase: 3, projectName: 'test' });
+    expect(() => manager.read(cwd)).not.toThrow();
+  });
+
+  it('reads currentPhase: 3 without migration', async () => {
+    const cwd = await makeWorkspace({ currentPhase: 3, projectName: 'test' });
+    const progress = manager.read(cwd);
+    expect(progress.currentPhase).toBe(3);
+    expect(progress.phaseStates?.find(s => s.phaseId === 2)).toBeUndefined();
+  });
+});
+
+describe('ProgressManager — recordPhaseVerdict / getPhaseState', () => {
+  const manager = new ProgressManager();
+  let cwd: string;
+
+  beforeEach(async () => {
+    cwd = await fse.mkdtemp(path.join(os.tmpdir(), 'phasegate-pm-verdict-'));
+    await fse.ensureDir(path.join(cwd, '.phasegate', 'requirements'));
+    const progress = {
+      projectName: 'test',
+      currentPhase: 4,
+      activeRequirement: 'feature',
+      requirements: [{ name: 'feature', file: 'feature.md', status: 'selected' }],
+      design: { modules: [], contracts: [], reviewPassed: false },
+      modules: [{ name: 'mod', status: 'done' }],
+      codeReviewPassed: false,
+      blockers: [],
+    };
+    await fse.writeJson(path.join(cwd, '.phasegate', 'progress.json'), progress, { spaces: 2 });
+  });
+
+  afterEach(async () => {
+    await fse.remove(cwd);
+  });
+
+  it('writes and reads verdict for phase 4', () => {
+    const verdict = {
+      verdict: 'accepted' as const,
+      reviewedBy: 'phase4' as const,
+      findings: [],
+      residualRisks: [],
+    };
+    manager.recordPhaseVerdict(cwd, 4, verdict);
+    const state = manager.getPhaseState(cwd, 4);
+    expect(state?.state).toBe('gate_passed');
+    expect(state?.verdict?.verdict).toBe('accepted');
+
+    const progress = manager.read(cwd);
+    expect(progress.phase4Verdict?.verdict).toBe('accepted');
+  });
+
+  it('records gate_failed for rejected verdict', () => {
+    const verdict = {
+      verdict: 'rejected' as const,
+      reviewedBy: 'phase4' as const,
+      findings: [{ level: 'P0' as const, description: 'Critical bug', resolved: false }],
+      residualRisks: [],
+    };
+    manager.recordPhaseVerdict(cwd, 4, verdict);
+    const state = manager.getPhaseState(cwd, 4);
+    expect(state?.state).toBe('gate_failed');
   });
 });

@@ -12,10 +12,14 @@ import type { RunnerScope } from './ai-runner';
 
 const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
 
-const PHASE_META: Record<number, { title: string; promptFile: string }> = {
-  1: { title: 'Design Generation', promptFile: 'phase1_design.md' },
-  2: { title: 'Design Review', promptFile: 'phase2_review.md' },
-  4: { title: 'Code Review', promptFile: 'phase4_code_review.md' },
+const PHASE_META: Record<number, { title: string; promptFile: string; deprecated?: boolean }> = {
+  1: { title: 'Design Generation (with embedded self-check)', promptFile: 'phase1_design.md' },
+  2: {
+    title: 'Design Review',
+    promptFile: 'phase2_review.md',
+    deprecated: true, // Phase 2 folded into Phase 1
+  },
+  4: { title: 'Lightweight Final Review', promptFile: 'phase4_code_review.md' },
   5: { title: 'Acceptance', promptFile: 'phase5_acceptance.md' },
 };
 
@@ -35,6 +39,17 @@ export class PhaseExecutor implements IPhaseExecutor {
   private readonly progressManager = new ProgressManager();
 
   async prepare(cwd: string, phase: Exclude<ExecutablePhaseId, 3>): Promise<PreparedPhase> {
+    if (phase === 2) {
+      // Phase 2 is migrated — return a no-op PreparedPhase (safety net for direct calls)
+      const runner = await createRunner(cwd, 'default');
+      return {
+        runner,
+        contextFiles: [],
+        prompt: '<!-- Phase 2 migrated into Phase 1 -->',
+        title: 'Design Review (migrated)',
+      };
+    }
+
     const meta = PHASE_META[phase];
     if (!meta) {
       throw new Error(`No runner configured for phase ${phase}.`);
@@ -56,12 +71,16 @@ export class PhaseExecutor implements IPhaseExecutor {
   }
 
   async execute(cwd: string, phase: ExecutablePhaseId): Promise<PhaseExecutionResult> {
+    if (phase === 2) {
+      // Safety net for direct calls (not the main run.ts path)
+      return { phase: 2, output: 'phase2_migrated' };
+    }
     if (phase === 3) {
       const results = await this.runPhase3(cwd);
       return { phase, phase3Results: results };
     }
 
-    await this.runPromptPhase(cwd, phase);
+    await this.runPromptPhase(cwd, phase as Exclude<ExecutablePhaseId, 2 | 3>);
     return { phase };
   }
 
@@ -94,7 +113,7 @@ export class PhaseExecutor implements IPhaseExecutor {
     }
   }
 
-  private async runPromptPhase(cwd: string, phase: Exclude<ExecutablePhaseId, 3>): Promise<void> {
+  private async runPromptPhase(cwd: string, phase: Exclude<ExecutablePhaseId, 2 | 3>): Promise<void> {
     const meta = PHASE_META[phase];
     if (!meta) {
       console.error(chalk.red(`Error: No runner configured for phase ${phase}.`));
@@ -136,7 +155,7 @@ export class PhaseExecutor implements IPhaseExecutor {
 
   private async buildPhaseContextFiles(
     cwd: string,
-    phase: Exclude<ExecutablePhaseId, 3>
+    phase: Exclude<ExecutablePhaseId, 2 | 3>
   ): Promise<string[]> {
     const pg = path.join(cwd, '.phasegate');
     const archConstraints = path.join(cwd, 'docs', 'core', 'architecture-constraints.md');
@@ -149,15 +168,10 @@ export class PhaseExecutor implements IPhaseExecutor {
         files.push(...activeRequirementFiles);
         break;
       }
-      case 2: {
-        files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
-        files.push(...(await listMarkdownFiles(path.join(pg, 'contracts'))));
-        files.push(...activeRequirementFiles);
-        break;
-      }
       case 4: {
         files.push(path.join(pg, 'progress.json'));
-        files.push(...(await listMarkdownFiles(path.join(pg, 'tasks'))));
+        // Filter: only task books for done modules (not all modules)
+        files.push(...(await this.listDoneModuleTaskBooks(cwd)));
         files.push(...(await listMarkdownFiles(path.join(pg, 'contracts'))));
         files.push(...activeRequirementFiles);
         if (await fse.pathExists(summaryDir)) {
@@ -202,17 +216,29 @@ export class PhaseExecutor implements IPhaseExecutor {
     return (await fse.pathExists(requirementPath)) ? [requirementPath] : [];
   }
 
-  private getRunnerScopeForPhase(phase: Exclude<ExecutablePhaseId, 3>): RunnerScope {
+  private getRunnerScopeForPhase(phase: Exclude<ExecutablePhaseId, 2 | 3>): RunnerScope {
     switch (phase) {
       case 1:
         return 'phase1';
-      case 2:
-        return 'phase2';
       case 4:
         return 'phase4';
       case 5:
         return 'phase5';
     }
+  }
+
+  private async listDoneModuleTaskBooks(cwd: string): Promise<string[]> {
+    const progress = this.progressManager.read(cwd);
+    const doneModules = progress.modules.filter(m => m.status === 'done').map(m => m.name);
+    const tasksDir = path.join(cwd, '.phasegate', 'tasks');
+    const files: string[] = [];
+    for (const name of doneModules) {
+      const f = path.join(tasksDir, `${name}.md`);
+      if (await fse.pathExists(f)) files.push(f);
+    }
+    // Fallback: if no done modules found, include all task books
+    if (files.length === 0) return listMarkdownFiles(tasksDir);
+    return files;
   }
 
   private async listWorkerReportFiles(scratchpadBase: string): Promise<string[]> {

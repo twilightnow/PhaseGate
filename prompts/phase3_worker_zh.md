@@ -7,3 +7,5 @@
 - 只读取注入的 task、contract 和 architecture constraints
 - 最终报告写入 `.phasegate/scratchpad/{module}/report.json`
 - 不要读写 `.phasegate/progress.md`
+- **必须产出 self-review bundle**（implementationSummary、changedFiles、testsRun/testSummary、selfReviewFindings、knownRisks）
+- Phase 4 将 review bundle 作为主要评审输入，缺失则拒绝进入 Phase 5

@@ -151,11 +151,12 @@ export class Orchestrator implements IOrchestrator {
 
     try {
       const activeRunner = runner ?? (await createRunner(projectRoot));
-      const report = await withTimeout(
+      const rawReport = await withTimeout(
         activeRunner.fork(contextFiles, prompt, hooks),
         timeoutMs,
         `worker timeout after ${formatDuration(timeoutMs)}`
       );
+      const report = normalizeWorkerReport(rawReport);
       const durationMs = Date.now() - startMs;
 
       await fse.writeFile(
@@ -198,10 +199,22 @@ export class Orchestrator implements IOrchestrator {
 
     const contextFiles = await this.buildCoordinatorContextFiles(projectRoot);
     const prompt = buildCoordinatorPrompt(nodes, scratchpadPath);
-    const brief = await runner.run(contextFiles, prompt);
+    const reviewBundleReminder = this.buildReviewBundleReminder();
+    const brief = await runner.run(contextFiles, prompt + '\n\n' + reviewBundleReminder);
 
     await fse.writeFile(path.join(scratchpadPath, 'brief.md'), brief, 'utf-8');
     console.log(`Coordinator brief written: ${path.join(SCRATCHPAD_BASE, 'coordinator', 'brief.md')}`);
+  }
+
+  private buildReviewBundleReminder(): string {
+    return [
+      '## Worker Review Bundle Requirement',
+      '',
+      'Each worker must produce a structured review bundle as part of its report JSON.',
+      'Required fields: implementationSummary, changedFiles, testsRun (or testSummary), selfReviewFindings, knownRisks.',
+      'This bundle is consumed by Phase 4 as the primary review input.',
+      '',
+    ].join('\n');
   }
 
   private async buildCoordinatorContextFiles(projectRoot: string): Promise<string[]> {
@@ -232,6 +245,29 @@ export class Orchestrator implements IOrchestrator {
 
     return files;
   }
+}
+
+function normalizeWorkerReport(raw: unknown): WorkerReport {
+  if (!raw || typeof raw !== 'object') {
+    return { scope: '', result: 'failed', keyFiles: [], filesChanged: [], issues: [] };
+  }
+  const r = raw as Record<string, unknown>;
+
+  return {
+    scope: typeof r.scope === 'string' ? r.scope : '',
+    result: r.result === 'done' ? 'done' : 'failed',
+    keyFiles: Array.isArray(r.keyFiles) ? r.keyFiles.filter((f): f is string => typeof f === 'string') : [],
+    filesChanged: Array.isArray(r.filesChanged) ? r.filesChanged.filter((f): f is string => typeof f === 'string') : [],
+    issues: Array.isArray(r.issues) ? r.issues.filter((i): i is string => typeof i === 'string') : [],
+    implementationSummary: typeof r.implementationSummary === 'string' ? r.implementationSummary : undefined,
+    changedFiles: Array.isArray(r.changedFiles) ? r.changedFiles.filter((f): f is string => typeof f === 'string') : undefined,
+    testsRun: Array.isArray(r.testsRun) ? r.testsRun.filter((t): t is string => typeof t === 'string') : undefined,
+    testSummary: typeof r.testSummary === 'string' ? r.testSummary : undefined,
+    selfReviewFindings: Array.isArray(r.selfReviewFindings) ? r.selfReviewFindings.filter((f): f is string => typeof f === 'string') : undefined,
+    knownRisks: Array.isArray(r.knownRisks) ? r.knownRisks.filter((rk): rk is string => typeof rk === 'string') : undefined,
+    publicSurfaceChanged: typeof r.publicSurfaceChanged === 'boolean' ? r.publicSurfaceChanged : undefined,
+    recommendedReviewScope: Array.isArray(r.recommendedReviewScope) ? r.recommendedReviewScope.filter((s): s is string => typeof s === 'string') : undefined,
+  };
 }
 
 function buildWorkerPrompt(node: ModuleNode, scratchpadPath: string): string {

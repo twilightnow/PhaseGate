@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fse from 'fs-extra';
-import type { ProjectProgress } from '../types';
+import type { ProjectProgress, WorkerReport } from '../types';
 import { readAcceptanceCriteria } from './progress-report';
 
 type WorkerReportSnapshot = {
@@ -65,7 +65,7 @@ export class PhaseArtifactBuilder {
     const skipped = progress.modules.filter(
       (entry) => entry.status === 'failed' || entry.status === 'blocked'
     );
-    const reports = this.readWorkerReports(cwd, done.map((entry) => entry.name));
+    const reports = this.readFullWorkerReports(cwd, done.map((entry) => entry.name));
 
     const lines = [
       '# Phase 4 Summary',
@@ -74,25 +74,21 @@ export class PhaseArtifactBuilder {
       '',
       '## Current State',
       done.length > 0
-        ? 'Code review completed for all done modules.'
-        : 'No done modules were available for code review.',
+        ? 'Lightweight final review completed for all done modules.'
+        : 'No done modules were available for review.',
       '',
       '## Coverage',
       done.length > 0
         ? done
-            .map((entry) => {
-              const report = reports[entry.name];
-              const keyFiles = report?.keyFiles.length ? ` key files: ${report.keyFiles.join(', ')}` : '';
-              return `- ${entry.name}: reviewed.${keyFiles}`;
-            })
+            .map((entry) => this.buildModuleReviewSummaryLine(entry.name, reports[entry.name]))
             .join('\n')
         : '- none',
       '',
-      '## Issues Fixed',
-      buildIssueSummary(reports, done.map((entry) => entry.name)),
+      '## Self-Review Findings',
+      buildSelfReviewFindingsSummary(reports, done.map((entry) => entry.name)),
       '',
-      '## Remaining Non-P0 Issues',
-      '- none recorded in automation summary',
+      '## Known Risks',
+      buildKnownRisksSummary(reports, done.map((entry) => entry.name)),
       '',
       '## Modules Skipped',
       skipped.length > 0
@@ -102,6 +98,22 @@ export class PhaseArtifactBuilder {
     ];
 
     fse.writeFileSync(summaryPath, lines.join('\n'), 'utf-8');
+  }
+
+  private buildModuleReviewSummaryLine(name: string, report?: WorkerReport): string {
+    // Use new fields first, fall back to legacy fields
+    const files = report?.changedFiles ?? report?.keyFiles ?? [];
+    const summary = report?.implementationSummary;
+    const risks = report?.knownRisks ?? [];
+    const testSummary = report?.testSummary;
+
+    const parts: string[] = [`- ${name}: reviewed.`];
+    if (summary) parts.push(`Summary: ${summary}.`);
+    if (files.length) parts.push(`Changed: ${files.join(', ')}.`);
+    if (testSummary) parts.push(`Tests: ${testSummary}.`);
+    if (risks.length) parts.push(`Known risks: ${risks.join('; ')}.`);
+
+    return parts.join(' ');
   }
 
   writePhase4ReviewOutput(cwd: string, output: string): void {
@@ -279,6 +291,37 @@ export class PhaseArtifactBuilder {
 
     return reports;
   }
+
+  private readFullWorkerReports(cwd: string, moduleNames: string[]): Record<string, WorkerReport> {
+    const reports: Record<string, WorkerReport> = {};
+
+    for (const moduleName of moduleNames) {
+      const reportPath = path.join(cwd, '.phasegate', 'scratchpad', moduleName, 'report.json');
+      if (!fse.existsSync(reportPath)) {
+        continue;
+      }
+
+      try {
+        const raw = fse.readJsonSync(reportPath) as Record<string, unknown>;
+        reports[moduleName] = {
+          scope: typeof raw.scope === 'string' ? raw.scope : moduleName,
+          result: raw.result === 'done' ? 'done' : 'failed',
+          keyFiles: Array.isArray(raw.keyFiles) ? raw.keyFiles.filter((f): f is string => typeof f === 'string') : [],
+          filesChanged: Array.isArray(raw.filesChanged) ? raw.filesChanged.filter((f): f is string => typeof f === 'string') : [],
+          issues: Array.isArray(raw.issues) ? raw.issues.filter((i): i is string => typeof i === 'string') : [],
+          implementationSummary: typeof raw.implementationSummary === 'string' ? raw.implementationSummary : undefined,
+          changedFiles: Array.isArray(raw.changedFiles) ? raw.changedFiles.filter((f): f is string => typeof f === 'string') : undefined,
+          testSummary: typeof raw.testSummary === 'string' ? raw.testSummary : undefined,
+          knownRisks: Array.isArray(raw.knownRisks) ? raw.knownRisks.filter((r): r is string => typeof r === 'string') : undefined,
+          selfReviewFindings: Array.isArray(raw.selfReviewFindings) ? raw.selfReviewFindings.filter((f): f is string => typeof f === 'string') : undefined,
+        };
+      } catch {
+        reports[moduleName] = { scope: moduleName, result: 'failed', keyFiles: [], filesChanged: [], issues: ['failed to parse worker report'] };
+      }
+    }
+
+    return reports;
+  }
 }
 
 function buildIssueSummary(
@@ -295,6 +338,33 @@ function buildIssueSummary(
   });
 
   return entries.length > 0 ? entries.join('\n') : '- none recorded in worker reports';
+}
+
+function buildSelfReviewFindingsSummary(
+  reports: Record<string, WorkerReport>,
+  moduleNames: string[]
+): string {
+  const entries = moduleNames.flatMap((moduleName) => {
+    const report = reports[moduleName];
+    // Prefer selfReviewFindings, fall back to issues
+    const findings = report?.selfReviewFindings ?? report?.issues ?? [];
+    if (findings.length === 0) return [];
+    return findings.map((f) => `- ${moduleName}: ${f}`);
+  });
+  return entries.length > 0 ? entries.join('\n') : '- none reported';
+}
+
+function buildKnownRisksSummary(
+  reports: Record<string, WorkerReport>,
+  moduleNames: string[]
+): string {
+  const entries = moduleNames.flatMap((moduleName) => {
+    const report = reports[moduleName];
+    const risks = report?.knownRisks ?? [];
+    if (risks.length === 0) return [];
+    return risks.map((r) => `- ${moduleName}: ${r}`);
+  });
+  return entries.length > 0 ? entries.join('\n') : '- none identified';
 }
 
 function formatModuleReason(entry: {

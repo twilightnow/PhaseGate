@@ -1,7 +1,11 @@
 import type { ModuleRunResult } from './orchestrator';
-import type { PhaseId } from '../types';
+import type { PhaseId, VerdictRecord } from '../types';
 
-export type ExecutablePhaseId = Exclude<PhaseId, 0>;
+/**
+ * Phases that can be actively executed in the run loop.
+ * Phase 2 is retained as a type value but treated as no-op / migrated in runtime.
+ */
+export type ExecutablePhaseId = 1 | 2 | 3 | 4 | 5;
 
 export interface PhaseExecutionResult {
   phase: ExecutablePhaseId;
@@ -17,4 +21,5 @@ export interface PhaseTransitionResult {
   shouldContinue: boolean;
   stopReason: PhaseStopReason;
   message: string;
+  verdict?: VerdictRecord;
 }

@@ -120,6 +120,21 @@ Once finalized, changes require notifying all consumers and re-running Phase 2 r
 - Each contract frontmatter lists the correct `consumers`
 - If this is minimal delivery, the output must stay minimal and explain why contracts were unnecessary
 
+## Design Self-Check (Embedded)
+
+After generating task books and contracts, perform the following design self-check **before** writing the Phase 1 Summary.
+
+### Checklist
+
+1. **Responsibility uniqueness**: Does each module have a clearly distinct responsibility? Are there any overlapping or duplicated responsibilities across modules?
+2. **Out-of-scope declaration**: Does each task book have an explicit `Out of Scope` section?
+3. **Dependency-contract alignment**: For every inter-module dependency listed in a task book, is there a corresponding contract? Are contract consumers correctly listed?
+4. **Requirements coverage**: Does the set of task books cover all acceptance criteria from the requirement document?
+5. **Edge case capture**: Are important edge cases and failure modes reflected in the task books?
+6. **Circular dependency check**: Do any modules have circular dependencies?
+
+If any critical issues are found during the self-check, **fix them before finalizing** the task books and contracts. Do not proceed to the Phase 1 Summary with unresolved critical design issues.
+
 ## Final Response
 
 Return a short summary with:
@@ -127,4 +142,19 @@ Return a short summary with:
 - whether Minimal Delivery Mode was used
 - modules created
 - contracts created
-- any assumptions that Phase 2 should review carefully
+- any assumptions made
+
+Then append:
+
+```
+## Design Risk Summary
+
+### Review Focus
+(list the top 2-3 areas that need careful attention during implementation)
+
+### Known Design Risks
+(list any risks identified during the self-check; write "none identified" if clean)
+
+### Execution Wave Hints
+(optional: rough ordering or parallelism hints for Phase 3 orchestration)
+```

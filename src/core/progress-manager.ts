@@ -3,9 +3,11 @@ import * as fse from 'fs-extra';
 import type {
   ModuleRunStatus,
   PhaseId,
+  PhaseStateEntry,
   ProjectProgress,
   RequirementEntry,
   RequirementStatus,
+  VerdictRecord,
 } from '../types';
 import { renderProgressMarkdown } from './progress-report';
 
@@ -70,7 +72,35 @@ function normalizeModuleStatus(value: unknown): ModuleRunStatus {
   }
 }
 
-function normalizeProgress(raw: unknown): ProjectProgress {
+/**
+ * Migrates raw currentPhase value.
+ * Phase 2 is folded into Phase 1 — old workspaces at Phase 2 are reset to Phase 1.
+ */
+function migrateCurrentPhase(raw: unknown): PhaseId {
+  if (typeof raw !== 'number') return 0;
+  if (raw === 2) {
+    // Phase 2 is migrated; reset to Phase 1 so user can re-run Phase 1 → Phase 3
+    return 1;
+  }
+  if (raw >= 0 && raw <= 5) return raw as PhaseId;
+  return 0;
+}
+
+function parsePhaseStateEntry(raw: unknown): PhaseStateEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.phaseId !== 'number' || typeof r.state !== 'string' || typeof r.enteredAt !== 'string') {
+    return null;
+  }
+  return {
+    phaseId: r.phaseId as PhaseId,
+    state: r.state as PhaseStateEntry['state'],
+    enteredAt: r.enteredAt,
+    verdict: r.verdict as VerdictRecord | undefined,
+  };
+}
+
+function normalizeProgress(raw: unknown, originalCurrentPhase?: number): ProjectProgress {
   const candidate = (raw ?? {}) as Record<string, unknown>;
   const requirements = Array.isArray(candidate.requirements)
     ? candidate.requirements
@@ -78,18 +108,23 @@ function normalizeProgress(raw: unknown): ProjectProgress {
         .filter((entry): entry is RequirementEntry => entry !== null)
     : [];
 
-  return {
+  const rawCurrentPhase = typeof candidate.currentPhase === 'number' ? candidate.currentPhase : -1;
+  const migratedPhase = migrateCurrentPhase(candidate.currentPhase);
+
+  // Parse phaseStates (defensive)
+  const rawPhaseStates = Array.isArray(candidate.phaseStates)
+    ? candidate.phaseStates
+        .map(parsePhaseStateEntry)
+        .filter((e): e is PhaseStateEntry => e !== null)
+    : undefined;
+
+  const progress: ProjectProgress = {
     projectName:
       typeof candidate.projectName === 'string' && candidate.projectName.trim()
         ? candidate.projectName.trim()
         : 'phasegate-project',
     locale: typeof candidate.locale === 'string' ? candidate.locale : undefined,
-    currentPhase:
-      typeof candidate.currentPhase === 'number' &&
-      candidate.currentPhase >= 0 &&
-      candidate.currentPhase <= 5
-        ? (candidate.currentPhase as PhaseId)
-        : 0,
+    currentPhase: migratedPhase,
     activeRequirement:
       typeof candidate.activeRequirement === 'string' && candidate.activeRequirement.trim()
         ? candidate.activeRequirement.trim()
@@ -148,7 +183,28 @@ function normalizeProgress(raw: unknown): ProjectProgress {
     blockers: Array.isArray(candidate.blockers)
       ? candidate.blockers.filter((value): value is string => typeof value === 'string')
       : [],
+    phase4Verdict: candidate.phase4Verdict as VerdictRecord | undefined,
+    phaseStates: rawPhaseStates,
   };
+
+  // Migration: if old workspace had currentPhase: 2, add a migration record to phaseStates
+  if (rawCurrentPhase === 2) {
+    maybeRecordPhase2Migration(progress);
+  }
+
+  return progress;
+}
+
+function maybeRecordPhase2Migration(progress: ProjectProgress): void {
+  const hasRecord = progress.phaseStates?.some(s => s.phaseId === 2);
+  if (hasRecord) return;
+  const states = progress.phaseStates ?? [];
+  states.push({
+    phaseId: 2,
+    state: 'migrated',
+    enteredAt: new Date().toISOString(),
+  });
+  progress.phaseStates = states;
 }
 
 function normalizeRequirementName(input: string): string {
@@ -205,6 +261,8 @@ export interface IProgressManager {
   markModuleDone(cwd: string, moduleName: string): void;
   markModuleFailed(cwd: string, moduleName: string, error: string): void;
   markModuleBlocked(cwd: string, moduleName: string, blockedBy: string): void;
+  recordPhaseVerdict(cwd: string, phaseId: 4 | 5, verdict: VerdictRecord): void;
+  getPhaseState(cwd: string, phaseId: PhaseId): PhaseStateEntry | undefined;
 }
 
 export class ProgressManager implements IProgressManager {
@@ -410,5 +468,36 @@ export class ProgressManager implements IProgressManager {
     mod.status = 'blocked';
     mod.blockedBy = blockedBy;
     this.write(cwd, progress);
+  }
+
+  /**
+   * Writes a VerdictRecord to progress.json for the specified phase.
+   * Also updates the phaseStates array.
+   */
+  recordPhaseVerdict(cwd: string, phaseId: 4 | 5, verdict: VerdictRecord): void {
+    const progress = this.read(cwd);
+    if (phaseId === 4) {
+      progress.phase4Verdict = verdict;
+    }
+    const states = progress.phaseStates ?? [];
+    const idx = states.findIndex(s => s.phaseId === phaseId);
+    const entry: PhaseStateEntry = {
+      phaseId,
+      state: verdict.verdict === 'rejected' ? 'gate_failed' : 'gate_passed',
+      enteredAt: new Date().toISOString(),
+      verdict,
+    };
+    if (idx >= 0) states[idx] = entry;
+    else states.push(entry);
+    progress.phaseStates = states;
+    this.write(cwd, progress);
+  }
+
+  /**
+   * Returns the PhaseStateEntry for the given phase, or undefined if not found.
+   */
+  getPhaseState(cwd: string, phaseId: PhaseId): PhaseStateEntry | undefined {
+    const progress = this.read(cwd);
+    return progress.phaseStates?.find(s => s.phaseId === phaseId);
   }
 }

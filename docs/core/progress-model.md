@@ -23,7 +23,7 @@ Key fields:
 {
   "projectName": "demo",
   "locale": "en",
-  "currentPhase": 0,
+  "currentPhase": 1,
   "activeRequirement": null,
   "requirements": [],
   "design": {
@@ -33,7 +33,9 @@ Key fields:
   },
   "modules": [],
   "codeReviewPassed": false,
-  "blockers": []
+  "blockers": [],
+  "phase4Verdict": null,
+  "phaseStates": []
 }
 ```
 
@@ -45,15 +47,28 @@ Key fields:
 - `currentPhase`
   - Execution-local phase for the active requirement.
   - `0` means no active execution.
+  - Valid active values: `1`, `3`, `4`, `5`. Legacy value `2` is migrated to `1` on read.
 - `requirements[]`
   - Backlog entries discovered from `.phasegate/requirements/*.md`.
   - Status values: `draft`, `approved`, `selected`, `implemented`, `archived`.
 - `design`
-  - Phase 1 and Phase 2 outputs for the active requirement.
+  - Phase 1 outputs (task books, contracts). `reviewPassed` is set to `true` when the embedded Phase 1 self-check passes.
 - `modules`
   - Runtime module state used during Phase 3 orchestration.
 - `codeReviewPassed`
-  - Phase 4 gate result.
+  - Legacy Phase 4 gate result flag (boolean). Superseded by `phase4Verdict`.
+- `phase4Verdict`
+  - Structured `VerdictRecord` written by Phase 4 gate. Shape:
+    ```json
+    {
+      "verdict": "accepted" | "conditional_pass" | "rejected",
+      "summary": "...",
+      "findings": [{ "level": "info" | "warning" | "blocking", "module": "...", "message": "..." }]
+    }
+    ```
+- `phaseStates[]`
+  - Per-phase execution state entries. Shape: `{ phaseId, state, enteredAt?, note? }`.
+  - Used to record migration events (e.g., `{phaseId: 2, state: 'migrated'}`) and phase verdicts.
 - `blockers`
   - Known blocking runtime issues.
 

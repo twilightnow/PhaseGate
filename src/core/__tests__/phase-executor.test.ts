@@ -82,4 +82,25 @@ describe('PhaseExecutor.prepare', () => {
       path.join(cwd, '.phasegate', 'scratchpad', 'module-a', 'report.json')
     );
   });
+
+  it('Phase 2 prepare returns a no-op PreparedPhase without AI execution', async () => {
+    const cwd = await makeWorkspace();
+    const executor = new PhaseExecutor();
+
+    const prepared = await executor.prepare(cwd, 2);
+
+    expect(prepared.contextFiles).toHaveLength(0);
+    expect(prepared.prompt).toContain('migrated');
+    expect(prepared.title).toContain('migrated');
+  });
+
+  it('Phase 2 execute returns phase2_migrated output without AI call', async () => {
+    const cwd = await makeWorkspace();
+    const executor = new PhaseExecutor();
+
+    const result = await executor.execute(cwd, 2);
+
+    expect(result.phase).toBe(2);
+    expect(result.output).toBe('phase2_migrated');
+  });
 });

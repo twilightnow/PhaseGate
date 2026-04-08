@@ -3,6 +3,15 @@
 
 export type PhaseId = 0 | 1 | 2 | 3 | 4 | 5;
 
+/**
+ * Phases in the default auto-advance path (Phase 2 excluded).
+ * Used by PhaseTransitionManager to determine next phase.
+ */
+export type ActivePhaseId = 1 | 3 | 4 | 5;
+
+/** Ordered list of phases in the default auto-advance path. */
+export const ACTIVE_PHASE_SEQUENCE: ReadonlyArray<ActivePhaseId> = [1, 3, 4, 5];
+
 /** Design-time status used for requirements and design.modules. */
 export type ItemStatus = 'pending' | 'done' | 'blocked' | 'failed';
 export type RequirementStatus = 'draft' | 'approved' | 'selected' | 'implemented' | 'archived';
@@ -11,6 +20,44 @@ export type RequirementStatus = 'draft' | 'approved' | 'selected' | 'implemented
 export type ModuleRunStatus = 'pending' | 'running' | 'done' | 'failed' | 'blocked';
 
 export type ContractStatus = 'draft' | 'finalized';
+
+// ---- VerdictRecord (structured review verdict) ----
+
+export type VerdictLevel = 'accepted' | 'conditional_pass' | 'rejected';
+
+export interface VerdictFinding {
+  level: 'P0' | 'P1' | 'P2';
+  description: string;
+  relatedModule?: string;
+  resolved: boolean;
+}
+
+export interface VerdictRecord {
+  verdict: VerdictLevel;
+  reviewedBy: 'phase4' | 'phase5' | 'manual';
+  timestamp?: string;
+  findings: VerdictFinding[];
+  residualRisks: string[];
+  confidenceLevel?: 'high' | 'medium' | 'low';
+}
+
+// ---- PhaseStateEntry (explicit state machine entry per phase) ----
+
+export type PhaseExecutionState =
+  | 'idle'
+  | 'running'
+  | 'awaiting_gate'
+  | 'gate_passed'
+  | 'gate_failed'
+  | 'terminal'
+  | 'migrated';
+
+export interface PhaseStateEntry {
+  phaseId: PhaseId;
+  state: PhaseExecutionState;
+  enteredAt: string;
+  verdict?: VerdictRecord;
+}
 
 export interface ModuleEntry {
   name: string;
@@ -40,12 +87,17 @@ export interface ProjectProgress {
   design: {
     modules: ModuleEntry[];
     contracts: ContractEntry[];
+    /** true = Phase 1 embedded design checks completed (v1.1+: not Phase 2 review passed) */
     reviewPassed: boolean;
   };
   /** Runtime module list; status uses ModuleRunStatus, including 'running'. */
   modules: { name: string; status: ModuleRunStatus; blockedBy?: string }[];
   codeReviewPassed: boolean;
   blockers: string[];
+  /** Structured verdict from Phase 4 review gate (v1.1+). */
+  phase4Verdict?: VerdictRecord;
+  /** Explicit state machine entries per phase (v1.1+). */
+  phaseStates?: PhaseStateEntry[];
 }
 
 /** Interface contract file frontmatter used by the orchestrator for context injection decisions. */
@@ -60,8 +112,18 @@ export interface WorkerReport {
   scope: string; // "{ModuleName} - one-line responsibility"
   result: 'done' | 'failed';
   keyFiles: string[];
-  filesChanged: string[];
-  issues: string[];
+  filesChanged: string[];  // legacy field (= changedFiles alias)
+  issues: string[];        // legacy field (= selfReviewFindings alias)
+
+  // Phase 3 review bundle extension fields (optional, progressively required)
+  implementationSummary?: string;
+  changedFiles?: string[];
+  testsRun?: string[];
+  testSummary?: string;
+  selfReviewFindings?: string[];
+  knownRisks?: string[];
+  publicSurfaceChanged?: boolean;
+  recommendedReviewScope?: string[];
 }
 
 /** Emitted by spawnCliStreaming() for a tool_use content block. */

@@ -58,7 +58,17 @@ function renderStatus(progress: ProjectProgress): void {
   console.log(chalk.bold(progress.projectName));
   console.log(chalk.dim('-'.repeat(48)));
   console.log(`Active requirement: ${progress.activeRequirement ?? '(none)'}`);
+
+  // Show Phase 2 migration notice if applicable
+  const phase2State = progress.phaseStates?.find(s => s.phaseId === 2);
+  const phase2Display = phase2State?.state === 'migrated'
+    ? chalk.dim('Phase 2: Design Review → merged into Phase 1 (no separate execution needed)')
+    : null;
+
   console.log(`Execution phase: Phase ${progress.currentPhase}: ${phaseName}`);
+  if (phase2Display) {
+    console.log(`  ${phase2Display}`);
+  }
   console.log(`Gate status: ${gateIcon} ${gate.message}`);
   console.log(`Acceptance criteria recorded: ${criteria.length}`);
   console.log('');
@@ -80,7 +90,7 @@ function renderStatus(progress: ProjectProgress): void {
       console.log(`  ${icon} ${mod.name}`);
     }
     console.log(
-      `  ${progress.design.reviewPassed ? chalk.green('OK') : chalk.dim('.')} design review`
+      `  ${progress.design.reviewPassed ? chalk.green('OK') : chalk.dim('.')} Phase 1 design checks`
     );
     console.log('');
   }
@@ -123,7 +133,7 @@ function renderStatus(progress: ProjectProgress): void {
   }
 
   console.log(
-    `${progress.codeReviewPassed ? chalk.green('OK') : chalk.dim('.')} final code review`
+    `${progress.codeReviewPassed ? chalk.green('OK') : chalk.dim('.')} lightweight final review (Phase 4)`
   );
   console.log('');
 }

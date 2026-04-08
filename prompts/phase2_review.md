@@ -1,4 +1,9 @@
-# Phase 2: Design Review
+# Phase 2: Design Review [DEPRECATED]
+
+> **Note**: Phase 2 (Design Review) has been folded into Phase 1.
+> Design self-check constraints are now embedded in the Phase 1 prompt.
+> This prompt is retained for strict/debug use only and is not part of the default workflow.
+> Running `phasegate run` will skip this phase automatically.
 
 ## Goal
 

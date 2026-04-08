@@ -7,14 +7,16 @@
 
 ## Phase Table
 
-| Phase | Name | Entry |
-|---|---|---|
-| 0 | Requirements Discussion | `phasegate chat` |
-| 1 | Design Generation | `phasegate run` |
-| 2 | Design Review | `phasegate run` |
-| 3 | Parallel Module Development | `phasegate run` |
-| 4 | Code Review | `phasegate run` |
-| 5 | Acceptance | `phasegate run` |
+| Phase | Name | Entry | Notes |
+|---|---|---|---|
+| 0 | Requirements Discussion | `phasegate chat` | |
+| 1 | Design Generation (with embedded self-check) | `phasegate run` | |
+| ~~2~~ | ~~Design Review~~ | — | **Migrated** — folded into Phase 1 |
+| 3 | Parallel Module Development | `phasegate run` | Workers produce self-review bundles |
+| 4 | Lightweight Final Review | `phasegate run` | Structured VerdictRecord gate |
+| 5 | Acceptance | `phasegate run` | |
+
+**Active phase sequence:** `0 → 1 → 3 → 4 → 5`
 
 ## Core Rules
 
@@ -37,14 +39,13 @@
 ## Phase 1
 
 - Generates `.phasegate/tasks/*.md` and `.phasegate/contracts/*.md` for the active requirement.
-- On success, runtime syncs design modules and contracts into `progress.json`.
-- Advances to Phase 2.
+- AI performs an **embedded design self-check** (consistency, risk, public-surface) as part of the same response.
+- On success, runtime sets `design.reviewPassed = true`, syncs design modules and contracts into `progress.json`.
+- Advances directly to Phase 3.
 
-## Phase 2
+## Phase 2 (Migrated)
 
-- Reviews and normalizes task books and contracts.
-- Gate passes when all contracts are finalized.
-- Advances to Phase 3.
+Phase 2 (Design Review) has been **folded into Phase 1**. If `currentPhase: 2` is found in an existing `progress.json`, it is automatically migrated to `currentPhase: 1` and a `{phaseId: 2, state: 'migrated'}` entry is recorded in `phaseStates`. No AI call is made for Phase 2.
 
 ## Phase 3
 
@@ -56,10 +57,12 @@
 
 ## Phase 4
 
-- Reviews only modules that finished successfully in Phase 3.
-- Uses `progress.json`, task books, contracts, worker reports, and Phase 3 summary as context.
-- Gate passes when the review verdict is PASS and the phase-4 summary is persisted under `scratchpad/summaries/`.
-- Advances to Phase 5.
+- **Lightweight final review gate** — validates that worker self-review bundles are complete and risks are acceptable.
+- Context: `progress.json`, task books for **done** modules only, contracts, worker reports with self-review bundles, Phase 3 summary.
+- AI responds with a structured `VerdictRecord` JSON block (`accepted` / `conditional_pass` / `rejected`).
+- `accepted` / `conditional_pass` → gate passes, verdict recorded via `pm.recordPhaseVerdict`, advances to Phase 5.
+- `rejected` → `gate_failed` state, execution halts.
+- Falls back to legacy PASS/FAIL keyword detection when no JSON block is present.
 
 ## Phase 5
 

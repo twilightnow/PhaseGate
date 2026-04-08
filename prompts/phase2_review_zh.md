@@ -1,10 +1,8 @@
-# Phase 2 中文说明
+# Phase 2 中文说明 [已废弃]
+
+> **注意**：Phase 2（设计评审）已折叠进 Phase 1。
+> 设计自检约束现已嵌入 Phase 1 的 prompt 中。
+> 本文件仅供 strict/debug 模式使用，不参与默认工作流。
+> `phasegate run` 会自动跳过此阶段。
 
 当前运行时使用英文版 `phase2_review.md` 作为实际 prompt。
-
-本文件仅作为中文参考，关键约束如下：
-
-- 评审当前活动 requirement 的 task books 与 contracts
-- 不要依赖 `.phasegate/progress.md`
-- 所有状态以 `.phasegate/progress.json` 为准
-- 不要手写进度日志
