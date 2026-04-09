@@ -39,6 +39,10 @@ Write these files only:
 - `.phasegate/tasks/{module-name}.md`
 - `.phasegate/contracts/{InterfaceName}.md` when a real cross-module contract is required
 
+**Do not write actual implementation files** (source code, content files, config files, assets, etc.) in this phase.
+Even for minimal delivery tasks where the change is trivial, the task book is your only deliverable here.
+Phase 3 is responsible for executing the actual changes described in the task book.
+
 Do not write `.phasegate/progress.md` or any other progress log yourself. Runtime state is managed by the CLI.
 
 ## Design Book Template
@@ -102,7 +106,7 @@ interface {InterfaceName} {
 - {ModuleName}
 
 ## Change Rule
-Once finalized, changes require notifying all consumers and re-running Phase 2 review.
+Once finalized, changes require notifying all consumers. Re-run Phase 1 for significant structural changes.
 ````
 
 ## Contract Rules

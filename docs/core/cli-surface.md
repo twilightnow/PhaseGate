@@ -1,39 +1,46 @@
-# PhaseGate CLI Surface
+# PhaseGate CLI 接口
 
 - Type: core
 - Status: active
 - Reader: both
-- Use when: you need command-level behavior
+- Use when: 需要了解命令级别行为时
 
-## Commands
+## 命令
 
 - `phasegate init`
-  - Creates `.phasegate/`
-  - Creates `requirements/`, `tasks/`, `contracts/`, `scratchpad/`, `archive/`
-  - Writes `progress.json` and `phasegate.config.json`
+  - 创建 `.phasegate/`
+  - 创建 `requirements/`、`tasks/`、`contracts/`、`scratchpad/`、`archive/`
+  - 写入 `progress.json` 和 `phasegate.config.json`
 - `phasegate chat`
-  - Runs Phase 0 requirement discussion
-  - Approves requirement docs after the Phase 0 gate passes
+  - 运行 Phase 0 需求讨论
+  - Phase 0 门控通过后审批需求文档
 - `phasegate select <requirement>`
-  - Selects one approved requirement for execution
+  - 选择一个已批准的需求用于执行
 - `phasegate run`
-  - Executes the active requirement from the current phase
-  - `--requirement <name>` selects and runs in one command
-  - `--phase <n>` forces a specific phase
+  - 从当前阶段开始执行活跃需求
+  - `--requirement <name>` 一步完成选择并执行
+  - `--phase <n>` 强制指定特定阶段
+- `phasegate loop`
+  - 按优先级顺序自动选取并运行所有 `approved` 状态的需求
+  - 每完成一条需求后动态重新加载队列，响应 Phase 0 期间新增的需求
+  - `gate_failed` 时立即停止，保留 `activeRequirement` 以便人工处理
+- `phasegate loop --dry-run`
+  - 预览执行顺序（含 priority、approvedAt），不实际运行
 - `phasegate status`
-  - Prints a readable execution overview from `progress.json`
+  - 从 `progress.json` 打印可读的执行概览
+  - 输出末尾显示待执行队列条数，提示用 `loop --dry-run` 查看顺序
 - `phasegate progress`
-  - Prints the raw structured `progress.json` state
+  - 打印原始结构化的 `progress.json` 状态
 - `phasegate review <module>`
-  - Runs focused review for a specific module
+  - 对特定模块运行聚焦审查
 
-## Notes
+## 注意事项
 
-- `progress.json` is the only state authority.
-- There is no CLI command that displays or maintains `progress.md`.
-- Phase 3 uses the orchestrator directly; other phases use prompt-based execution.
+- `progress.json` 是唯一的状态权威来源。
+- 没有 CLI 命令用于显示或维护 `progress.md`。
+- Phase 3 直接使用 orchestrator；其他阶段使用基于提示的执行。
 
-## Related
+## 相关
 
 - [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)
 - [getting-started.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/getting-started.md)

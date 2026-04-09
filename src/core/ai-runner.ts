@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import type {
@@ -45,6 +46,9 @@ interface RunnerConfig {
   runner?: string;
   aiProfiles?: Record<string, AiProfileConfig>;
   aiRouting?: RoutingConfig;
+  claudeOptions?: {
+    dangerouslySkipPermissions?: boolean;
+  };
 }
 
 interface RunnerDefinition {
@@ -131,7 +135,10 @@ const LEGACY_RUNNER_ALIASES: Record<string, AdapterName> = {
 };
 
 export class CliRunner implements IAiRunner {
-  constructor(private readonly definition: RunnerDefinition) {}
+  constructor(
+    private readonly definition: RunnerDefinition,
+    private readonly extraArgs: string[] = []
+  ) {}
 
   capabilities(): RunnerCapabilities {
     return this.definition.capabilities;
@@ -143,7 +150,7 @@ export class CliRunner implements IAiRunner {
 
     if (normalizedHooks && this.definition.capabilities.runStreaming === 'event') {
       if (this.definition.command === 'claude') {
-        return spawnClaudeStreaming(fullPrompt, normalizedHooks);
+        return spawnClaudeStreaming(fullPrompt, normalizedHooks, this.extraArgs);
       }
       if (this.definition.command === 'codex') {
         return spawnCodexStreaming(
@@ -159,14 +166,14 @@ export class CliRunner implements IAiRunner {
       const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
       return spawnCliTextStreaming(
         this.definition.command,
-        this.definition.buildRunArgs(fullPrompt),
+        [...this.extraArgs, ...this.definition.buildRunArgs(fullPrompt)],
         stdinContent,
         normalizedHooks.onText
       );
     }
 
     const stdinContent = this.definition.useStdinForPrompt ? fullPrompt : undefined;
-    return spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
+    return spawnCli(this.definition.command, [...this.extraArgs, ...this.definition.buildRunArgs(fullPrompt)], stdinContent);
   }
 
   async fork(files: string[], prompt: string, hooks?: RunHooks): Promise<WorkerReport> {
@@ -184,12 +191,12 @@ export class CliRunner implements IAiRunner {
     } else if (hooks?.onText && this.definition.capabilities.forkStreaming === 'text') {
       output = await spawnCliTextStreaming(
         this.definition.command,
-        this.definition.buildRunArgs(fullPrompt),
+        [...this.extraArgs, ...this.definition.buildRunArgs(fullPrompt)],
         stdinContent,
         hooks.onText
       );
     } else {
-      output = await spawnCli(this.definition.command, this.definition.buildRunArgs(fullPrompt), stdinContent);
+      output = await spawnCli(this.definition.command, [...this.extraArgs, ...this.definition.buildRunArgs(fullPrompt)], stdinContent);
     }
 
     return parseWorkerReport(output);
@@ -211,10 +218,28 @@ export class CliRunner implements IAiRunner {
       return;
     }
 
-    await spawnCliInteractive(
-      this.definition.command,
-      this.definition.buildChatArgs(systemPrompt, systemPromptFile, initialMessage)
-    );
+    // Claude CLI rejects --append-system-prompt-file and --append-system-prompt together.
+    // When both are present, merge into a single temp file and use only the file flag.
+    let effectivePrompt = systemPrompt;
+    let effectiveFile = systemPromptFile;
+    let tmpFile: string | undefined;
+    if (systemPrompt && systemPromptFile) {
+      const fileContent = await fse.readFile(systemPromptFile, 'utf-8');
+      const combined = fileContent + '\n\n' + systemPrompt;
+      tmpFile = path.join(os.tmpdir(), `phasegate-chat-${Date.now()}.md`);
+      await fse.writeFile(tmpFile, combined, 'utf-8');
+      effectivePrompt = '';
+      effectiveFile = tmpFile;
+    }
+
+    try {
+      await spawnCliInteractive(
+        this.definition.command,
+        [...this.extraArgs, ...this.definition.buildChatArgs(effectivePrompt, effectiveFile, initialMessage)]
+      );
+    } finally {
+      if (tmpFile) await fse.remove(tmpFile);
+    }
   }
 }
 
@@ -229,7 +254,18 @@ export async function createRunner(
   scope: RunnerScope = 'default'
 ): Promise<IAiRunner> {
   const adapterName = await resolveAdapterName(projectRoot, scope);
-  return new CliRunner(ADAPTER_DEFINITIONS[adapterName]);
+  const extraArgs = adapterName === 'claude-code' ? await resolveClaudeExtraArgs(projectRoot) : [];
+  return new CliRunner(ADAPTER_DEFINITIONS[adapterName], extraArgs);
+}
+
+async function resolveClaudeExtraArgs(projectRoot: string): Promise<string[]> {
+  const loaded = await loadRunnerConfig(projectRoot);
+  if (!loaded) return [];
+  const args: string[] = [];
+  if (loaded.config.claudeOptions?.dangerouslySkipPermissions) {
+    args.push('--dangerously-skip-permissions');
+  }
+  return args;
 }
 
 function normalizeHooks(hooks?: RunHooks | ((event: RunEvent) => void)): RunHooks | undefined {
@@ -390,11 +426,35 @@ async function resolveCliInvocation(
     }
   }
 
+  // On Windows, shell: true causes cmd.exe to join the args array into a single
+  // command string without quoting.  Args that contain spaces (e.g. the kickoff
+  // message passed as a positional arg to claude) are silently truncated at the
+  // first space.  Escape them here so cmd.exe treats each arg as a single token.
+  if (process.platform === 'win32') {
+    return {
+      command,
+      args: args.map(escapeArgForWindowsShell),
+      shell: true,
+    };
+  }
+
   return {
     command,
     args,
-    shell: process.platform === 'win32',
+    shell: false,
   };
+}
+
+function escapeArgForWindowsShell(arg: string): string {
+  // If the arg contains characters cmd.exe would split on or misinterpret,
+  // wrap it in double-quotes and escape any internal double-quotes.
+  if (/[\s"&|<>^()!%]/.test(arg)) {
+    // Escape backslashes that immediately precede a double-quote (MSVCRT rules)
+    // then escape the quote itself, then wrap the whole thing.
+    const escaped = arg.replace(/(\\*)"/, '$1$1\\"').replace(/(\\*)$/, '$1$1');
+    return '"' + escaped + '"';
+  }
+  return arg;
 }
 
 async function buildCodexChatPrompt(
@@ -574,9 +634,9 @@ function spawnCliInteractive(command: string, args: string[]): Promise<void> {
   });
 }
 
-function spawnClaudeStreaming(prompt: string, hooks: RunHooks): Promise<string> {
+function spawnClaudeStreaming(prompt: string, hooks: RunHooks, extraArgs: string[] = []): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['--output-format', 'stream-json', '--verbose', '--print'], {
+    const proc = spawn('claude', [...extraArgs, '--output-format', 'stream-json', '--verbose', '--print'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
       windowsHide: true,

@@ -5,6 +5,7 @@
 本文件仅作为中文参考，关键约束如下：
 
 - 只为当前 `activeRequirement` 生成任务书与契约
+- **禁止写入实际实现文件**（代码、内容文件、配置等）；即使是极简交付任务，实现由 Phase 3 负责
 - 不要读写 `.phasegate/progress.md`
 - 运行时状态以 `.phasegate/progress.json` 为准
 - 阶段摘要由 CLI 写入 `scratchpad/summaries/`

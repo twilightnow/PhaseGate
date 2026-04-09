@@ -1,4 +1,4 @@
-# PhaseGate AI Routing
+# PhaseGate AI 路由
 
 - Type: core
 - Status: active
@@ -27,7 +27,7 @@
 - `review` 命令当前复用 `phase4` 的 reviewer 路由，不单独定义新的 scope。
 - `phase3.coordinator` 已经有真实调用入口：Orchestrator 会在 Phase 3 开始前生成 `.phasegate/scratchpad/coordinator/brief.md`。
 
-## Model
+## 模型
 
 路由设计拆成三层：
 
@@ -44,7 +44,7 @@
 scope -> profile -> adapter -> runner implementation
 ```
 
-## Configuration Shape
+## 配置结构
 
 当前 `.phasegate/phasegate.config.json` 支持以下结构：
 
@@ -69,7 +69,7 @@ scope -> profile -> adapter -> runner implementation
     "default": "default",
     "chat": "architect",
     "phase1": "architect",
-    "phase2": "reviewer",
+    "phase2": "reviewer",   // deprecated — Phase 2 is folded into Phase 1; key retained for compatibility
     "phase3.coordinator": "architect",
     "phase3.worker": "implementer",
     "phase4": "reviewer",
@@ -99,7 +99,7 @@ scope -> profile -> adapter -> runner implementation
 
 `options` 当前不启用，只作为后续 adapter 专属配置的结构预留。
 
-## Fixed Scopes
+## 固定 Scope
 
 当前固定支持以下 scope：
 
@@ -114,7 +114,7 @@ scope -> profile -> adapter -> runner implementation
 
 这些 scope 覆盖了当前 CLI 和调度层真正存在的担当边界。
 
-## Runtime Resolution
+## 运行时解析
 
 运行时从 `scope` 解析到实际 adapter 的顺序：
 
@@ -138,7 +138,7 @@ scope -> profile -> adapter -> runner implementation
 
 当前版本不再把 `gemini` 视为已适配目标；若旧配置仍写 `gemini`，应明确报错。
 
-## Adapter Capability Boundary
+## Adapter 能力边界
 
 adapter 允许存在能力差异，但差异必须由代码层显式声明，不能由配置层猜测。
 
@@ -158,7 +158,7 @@ adapter 允许存在能力差异，但差异必须由代码层显式声明，不
 - 不允许静默切换到别的 adapter
 - 当前版本不定义自动降级
 
-## Integration
+## 集成
 
 当前代码入口为：
 
@@ -177,14 +177,14 @@ createRunner(projectRoot, scope?)
 - Phase 5 -> `phase5`
 - `phasegate review <module>` -> `phase4`
 
-## Compatibility Boundary
+## 兼容性边界
 
 - 旧配置只有 `runner` 时，应继续正常工作
 - 新配置存在 `aiProfiles` / `aiRouting` 时，应优先使用新路由规则
 - `runner` 在过渡期内仍保留，用作兼容回退，不作为第一优先级配置
 - 文档和代码都应避免继续把 `provider` 当作主抽象
 
-## Out of Scope for V1
+## V1 不在范围内
 
 - 自定义 CLI 可执行文件路径
 - 每个 profile 自定义 `runArgs` / `chatArgs` / `env`
@@ -192,7 +192,7 @@ createRunner(projectRoot, scope?)
 - 不同 phase 使用不同 prompt transport 策略
 - 动态 discovery 新 scope
 
-## Related
+## 相关
 
 - [`overview.md`](./overview.md)
 - [`workflow-phases.md`](./workflow-phases.md)

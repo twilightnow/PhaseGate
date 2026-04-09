@@ -63,3 +63,7 @@ phasegate run --requirement login
 - [docs/guides/getting-started.md](./docs/guides/getting-started.md)
 - [docs/core/workflow-phases.md](./docs/core/workflow-phases.md)
 - [docs/core/progress-model.md](./docs/core/progress-model.md)
+
+## 常见问题
+
+codex powershell乱码，用UTF-8 编码初始化

@@ -1,4 +1,4 @@
-# Testing Guide
+# 测试指南
 
 - Type: guide
 - Status: active
@@ -7,17 +7,17 @@
 - Source of truth: 是
 - Update when: 测试命令、默认策略或本地验证约束变化时
 
-## Purpose
+## 目的
 
 保持 PhaseGate 的默认测试循环简单、便宜、可重复。
 
-## Scope
+## 范围
 
 包含：默认测试命令、build 与 test 的类型检查边界、live smoke test、Windows 用法。
 
 不包含：完整验收计划、阶段性任务自检记录。
 
-## Minimal Policy
+## 最小化策略
 
 1. `npm test` 和 `npm run test:unit` 是默认开发循环。
 2. 默认测试不得调用真实 AI runner，也不应消耗 token。
@@ -26,7 +26,7 @@
 5. 生产构建和测试类型检查分开处理：`tsconfig.build.json` 用于 build，`tsconfig.test.json` 用于 test type-check。
 6. Jest 在当前工程中使用 `--runInBand`，避免 Windows 或沙箱环境中的子进程限制导致 `spawn EPERM`。
 
-## Commands
+## 命令
 
 ```bash
 npm run build
@@ -43,7 +43,7 @@ $env:PHASEGATE_LIVE='1'
 npm run test:live
 ```
 
-## Notes
+## 注意事项
 
 - `npm run build` 只检查运行时代码，不编译 `src/**/__tests__/**`。
 - `tsconfig.test.json` 用于覆盖测试文件的 Jest 类型环境。
@@ -53,7 +53,7 @@ npm run test:live
 npm test -- ai-runner-routing ai-runner-stream orchestrator run-display
 ```
 
-## Related
+## 相关
 
 - [`getting-started.md`](./getting-started.md)
 - [`review-and-acceptance.md`](./review-and-acceptance.md)

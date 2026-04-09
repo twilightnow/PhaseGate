@@ -1,33 +1,33 @@
-# Public V1 Capabilities
+# 公开 V1 能力
 
 - Type: note
 - Status: historical
 - Reader: both
 
-## Purpose
+## 目的
 
-This note records a historical capability checkpoint for an earlier public-v1 target.
-It is not the current source of truth.
+本笔记记录了早期公开 v1 目标的历史能力检查点。
+这不是当前的真实来源。
 
-## Historical Capability Themes
+## 历史能力主题
 
-1. stable local setup and basic CLI flows
-2. reliable `init`, `chat`, `run`, `status`, `progress`, and `review`
-3. persisted project artifacts under `.phasegate/`
-4. resumable execution state
-5. Phase 3 coordinator and worker orchestration
-6. configurable AI routing
-7. baseline documentation
+1. 稳定的本地设置和基本 CLI 流程
+2. 可靠的 `init`、`chat`、`run`、`status`、`progress` 和 `review`
+3. 持久化保存在 `.phasegate/` 下的项目制品
+4. 可恢复的执行状态
+5. Phase 3 协调者与工作者编排
+6. 可配置的 AI 路由
+7. 基础文档
 
-## Important Drift Since This Note
+## 自本笔记以来的重要变化
 
-- `progress.json` is still the only authoritative state file
-- the current implementation no longer maintains `.phasegate/progress.md`
-- active execution is explicitly scoped by `activeRequirement`
-- phase summaries now live under `.phasegate/scratchpad/summaries/`
+- `progress.json` 仍然是唯一权威的状态文件
+- 当前实现不再维护 `.phasegate/progress.md`
+- 活跃执行明确由 `activeRequirement` 约束
+- 阶段摘要现在保存在 `.phasegate/scratchpad/summaries/` 下
 
-## Use Current Docs For
+## 请使用当前文档了解
 
-- actual workspace layout
-- actual CLI behavior
-- actual progress semantics
+- 实际工作区布局
+- 实际 CLI 行为
+- 实际进度语义

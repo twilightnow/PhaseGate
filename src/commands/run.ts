@@ -213,3 +213,64 @@ export function createRunCommand(): Command {
 
   return cmd;
 }
+
+/**
+ * Run all phases for the currently active requirement until completion or gate failure.
+ * Used by the loop command to automate requirement execution.
+ *
+ * @returns 'pass' if all phases completed successfully, 'gate_failed' if a gate blocked execution.
+ */
+export async function runPhasesUntilDone(
+  cwd: string,
+  pm: ProgressManager
+): Promise<'pass' | 'gate_failed'> {
+  const progress = pm.read(cwd);
+  const startPhase = (progress.currentPhase === 0 ? 1 : progress.currentPhase) as ExecutablePhaseId;
+
+  const executor = new PhaseExecutor();
+  const transitionManager = new PhaseTransitionManager(pm);
+  let phase = startPhase;
+
+  while (true) {
+    let executionResult;
+
+    if (phase === 2) {
+      console.log(
+        chalk.yellow('!') + ' Phase 2 (Design Review) has been folded into Phase 1.\n' +
+        '  Design self-check constraints are now embedded in the Phase 1 prompt.\n' +
+        '  Skipping Phase 2 AI execution. Transition manager will advance to Phase 3.'
+      );
+      executionResult = { phase: 2 as ExecutablePhaseId, output: 'phase2_migrated' };
+    } else if (phase === 3) {
+      executionResult = await executor.execute(cwd, 3);
+    } else {
+      console.log(chalk.cyan('->') + ` Running Phase ${phase}...`);
+      let prepared;
+      try {
+        prepared = await executor.prepare(cwd, phase as Exclude<ExecutablePhaseId, 2 | 3>);
+      } catch (err) {
+        console.error(chalk.red('Error:'), err instanceof Error ? err.message : err);
+        return 'gate_failed';
+      }
+
+      const output = await runSinglePhase(
+        prepared.runner,
+        prepared.contextFiles,
+        prepared.prompt,
+        phase,
+        prepared.title
+      );
+      executionResult = { phase, output };
+    }
+
+    const transition = await transitionManager.resolve(cwd, executionResult);
+    console.log(transition.message);
+
+    if (!transition.shouldContinue || transition.nextPhase === null) {
+      return transition.stopReason === 'gate_failed' ? 'gate_failed' : 'pass';
+    }
+
+    phase = transition.nextPhase;
+    console.log('');
+  }
+}

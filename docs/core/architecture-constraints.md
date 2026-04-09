@@ -1,37 +1,37 @@
-# PhaseGate Architecture Constraints
+# PhaseGate 架构约束
 
 - Type: core
 - Status: active
 - Reader: both
 
-## Workspace Constraints
+## 工作区约束
 
-- Runtime state lives in `.phasegate/progress.json`.
-- Requirement docs live in `.phasegate/requirements/`.
-- Active execution artifacts live in `.phasegate/tasks/` and `.phasegate/contracts/`.
-- Disposable outputs live in `.phasegate/scratchpad/`.
-- Archived historical artifacts live in `.phasegate/archive/`.
+- 运行时状态保存在 `.phasegate/progress.json` 中。
+- 需求文档保存在 `.phasegate/requirements/` 中。
+- 活跃执行制品保存在 `.phasegate/tasks/` 和 `.phasegate/contracts/` 中。
+- 可丢弃的输出保存在 `.phasegate/scratchpad/` 中。
+- 已归档的历史制品保存在 `.phasegate/archive/` 中。
 
-## Execution Constraints
+## 执行约束
 
-- Only one requirement may be active at a time.
-- `currentPhase` is execution-local, not workspace-global.
-- Phase 3 dependency order comes from task-book dependencies.
-- Phase 3 worker output is written as structured `report.json`.
+- 同一时间只能有一个需求处于活跃状态。
+- `currentPhase` 是执行本地的，而非工作区全局的。
+- Phase 3 的依赖顺序来自任务书的依赖关系。
+- Phase 3 工作者输出以结构化的 `report.json` 写入。
 
-## Context Constraints
+## 上下文约束
 
-- Prompt phases should use injected context files instead of reconstructing hidden state.
-- Phase 4 and Phase 5 should read summaries from `scratchpad/summaries/`, not from a removed progress log.
-- Requirement prompts should work against the active requirement rather than all backlog files unless the phase explicitly needs backlog context.
+- 提示阶段应使用注入的上下文文件，而不是重建隐藏状态。
+- Phase 4 和 Phase 5 应从 `scratchpad/summaries/` 读取摘要，而不是从已移除的进度日志中读取。
+- 需求提示应针对活跃需求执行，除非该阶段明确需要待办列表上下文，否则不应对所有待办文件执行。
 
-## Known Practical Limits
+## 已知实际限制
 
-- Output quality still depends on the quality of requirements, task books, and contracts.
-- Some validation remains human judgment, especially in acceptance.
-- Phase 3 is parallel by module but execution across requirements is still single-selection only.
+- 输出质量仍取决于需求、任务书和合约的质量。
+- 某些验证仍需人工判断，尤其是在验收阶段。
+- Phase 3 按模块并行，但跨需求的执行仍然是单选模式。
 
-## Related
+## 相关
 
 - [overview.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/overview.md)
 - [workflow-phases.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/workflow-phases.md)

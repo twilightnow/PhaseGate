@@ -8,3 +8,4 @@
 - 输入来自 `progress.json`、worker `report.json` 和 `scratchpad/summaries/`
 - `acceptance-guide.md` 由运行时生成
 - 不要写 `.phasegate/progress.md`
+- **修复范围限制**：仅可修改 Phase 3 已创建或修改的文件；不得引入新文件或超出现有实现范围的变更

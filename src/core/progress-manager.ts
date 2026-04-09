@@ -37,6 +37,20 @@ function normalizeRequirementStatus(value: unknown): RequirementStatus {
   return 'draft';
 }
 
+function normalizePriorityValue(value: unknown): 'high' | 'normal' | 'low' | undefined {
+  if (value === 'high' || value === 'normal' || value === 'low') return value;
+  return undefined;
+}
+
+function parseFrontmatterPriority(content: string): 'high' | 'normal' | 'low' {
+  const fmMatch = content.match(/^\s*---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return 'normal';
+  const yaml = fmMatch[1];
+  const priorityMatch = yaml.match(/^priority:\s*(high|normal|low)\s*$/m);
+  if (!priorityMatch) return 'normal';
+  return priorityMatch[1] as 'high' | 'normal' | 'low';
+}
+
 function normalizeRequirementEntry(entry: unknown): RequirementEntry | null {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -57,6 +71,8 @@ function normalizeRequirementEntry(entry: unknown): RequirementEntry | null {
     name,
     file,
     status: normalizeRequirementStatus(candidate.status),
+    priority: normalizePriorityValue(candidate.priority),
+    approvedAt: typeof candidate.approvedAt === 'string' ? candidate.approvedAt : undefined,
   };
 }
 
@@ -263,6 +279,7 @@ export interface IProgressManager {
   markModuleBlocked(cwd: string, moduleName: string, blockedBy: string): void;
   recordPhaseVerdict(cwd: string, phaseId: 4 | 5, verdict: VerdictRecord): void;
   getPhaseState(cwd: string, phaseId: PhaseId): PhaseStateEntry | undefined;
+  getQueuedRequirements(cwd: string): RequirementEntry[];
 }
 
 export class ProgressManager implements IProgressManager {
@@ -307,10 +324,20 @@ export class ProgressManager implements IProgressManager {
     progress.requirements = files.map((file) => {
       const name = path.basename(file, '.md');
       const prior = existing.get(normalizeRequirementName(name));
+      const filePath = path.join(cwd, '.phasegate', 'requirements', file);
+      let priority: 'high' | 'normal' | 'low' = 'normal';
+      try {
+        const content = fse.readFileSync(filePath, 'utf-8') as string;
+        priority = parseFrontmatterPriority(content);
+      } catch {
+        // fallback to 'normal'
+      }
       return {
         name,
         file,
         status: prior?.status ?? 'draft',
+        priority,
+        approvedAt: prior?.approvedAt,
       };
     });
 
@@ -350,7 +377,7 @@ export class ProgressManager implements IProgressManager {
         return entry;
       }
 
-      return { ...entry, status: 'approved' };
+      return { ...entry, status: 'approved', approvedAt: entry.approvedAt ?? new Date().toISOString() };
     });
 
     if (target && !matched) {
@@ -499,5 +526,24 @@ export class ProgressManager implements IProgressManager {
   getPhaseState(cwd: string, phaseId: PhaseId): PhaseStateEntry | undefined {
     const progress = this.read(cwd);
     return progress.phaseStates?.find(s => s.phaseId === phaseId);
+  }
+
+  /**
+   * Returns approved requirements sorted by priority (high < normal < low),
+   * then by approvedAt ascending (oldest first).
+   */
+  getQueuedRequirements(cwd: string): RequirementEntry[] {
+    const progress = this.read(cwd);
+    const PRIORITY_ORDER: Record<string, number> = { high: 1, normal: 2, low: 3 };
+    return progress.requirements
+      .filter((req) => req.status === 'approved')
+      .sort((a, b) => {
+        const pa = PRIORITY_ORDER[a.priority ?? 'normal'] ?? 2;
+        const pb = PRIORITY_ORDER[b.priority ?? 'normal'] ?? 2;
+        if (pa !== pb) return pa - pb;
+        const ta = a.approvedAt ?? '';
+        const tb = b.approvedAt ?? '';
+        return ta.localeCompare(tb);
+      });
   }
 }

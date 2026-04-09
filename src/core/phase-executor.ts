@@ -12,13 +12,8 @@ import type { RunnerScope } from './ai-runner';
 
 const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
 
-const PHASE_META: Record<number, { title: string; promptFile: string; deprecated?: boolean }> = {
+const PHASE_META: Record<number, { title: string; promptFile: string }> = {
   1: { title: 'Design Generation (with embedded self-check)', promptFile: 'phase1_design.md' },
-  2: {
-    title: 'Design Review',
-    promptFile: 'phase2_review.md',
-    deprecated: true, // Phase 2 folded into Phase 1
-  },
   4: { title: 'Lightweight Final Review', promptFile: 'phase4_code_review.md' },
   5: { title: 'Acceptance', promptFile: 'phase5_acceptance.md' },
 };

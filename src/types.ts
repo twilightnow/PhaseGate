@@ -76,6 +76,8 @@ export interface RequirementEntry {
   name: string;
   file: string;
   status: RequirementStatus;
+  priority?: 'high' | 'normal' | 'low';
+  approvedAt?: string;
 }
 
 export interface ProjectProgress {

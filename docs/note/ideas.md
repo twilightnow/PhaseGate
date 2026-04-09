@@ -1,35 +1,66 @@
-# Ideas
+# 想法
 
-- Type: note
+- Type: task
 - Status: draft
 - Reader: both
+- Use when: 需要快速记下还没整理成正式任务或正式文档的想法时
+- Source of truth: 否
+- Update when: 有新想法、想法被转入 `tasks/backlog.md`，或确认过时要删除时
 
-## Reading Rule
+## Purpose
 
-This file is for brainstorming only.
-Nothing here is approved just because it appears in this note.
+保留一个低门槛的想法草稿区，避免临时念头直接污染长期文档。
 
-## Current Idea Buckets
+## Rules
 
-### Execution
+- 这里只记草稿，不记正式结论。
+- 想法稳定后再转入 `tasks/backlog.md` 或正式文档。
+- 明显过时的条目直接删除，不做历史维护。
 
-- queue support beyond one `activeRequirement`
-- better resume behavior after interrupted runs
-- clearer finalize and cleanup semantics
+## 讨论
 
-### Review And Acceptance
+- codex cli ：推进中，已跑通最小执行路径
+- p0创建需求池，p1-p5手动执行和自动从需求池选需求进行循环实现。需要确认队列设计，优先级确认，自动的选择原则等等。
+- 需要一个处理异常的phase
+- 增加初始项目的基本信息额分析和记录
+- 增加设计书的自动生成
+- 结构化专供ai使用的文档。token能节省吗？
+- P0的 prompt 讨论部分由ai做提案而非单纯询问
+- 锁执行中文件机制
 
-- richer structured review output
-- clearer residual-risk reporting
-- stronger acceptance reporting for partially blocked runs
+## 延后
 
-### Orchestration
+### 当前缺陷
+- Claude code， clodex 的权限问题，使用者需要修改 \.claude\settings.local.json PhaseGate\.codex\config.toml
 
-- tighter shared-file coordination across modules
-- better repo-level exploration before worker execution
-- clearer contract-injection rules
+### 文档管理
+- 使用指导需要继续区分本地源码运行和纯 `phasegate` 命令使用
+- 中间层设计文件应该保留到什么程度，怎么把维护成本压到最低
+- Prompt 约束：Phase 0 结束时是否需要 AI 明确提醒手动结束
+- 文件结构规划：在文档大量增加后如何持续防止堆积
+- 任务书和设计书边界怎么切，是否长期只保留任务书
 
-### UX
+### 功能扩展
+- 多模型配置：默认配置如何覆盖不同模型的调度方案
+- 多模型配置：不同阶段是否允许单独指定 runner
+- 多语言支持是否需要继续保留完整多套 prompt
+- 多任务并行时 `progress.json` 怎么组织
+- 跨阶段断点再续怎么设计
 
-- better human-readable summaries
-- clearer errors around selection, gating, and recovery
+## 核心功能流程
+
+Phase 0: 需求讨论
+  chat开始。
+  自动导入系统级提示词。
+  ai主动开口引导使用者讨论
+  在讨论结束后生成需求书。（可改成中间阶段生成？提示词需要细化
+→ Phase 1: 任务书生成
+  run开始
+  自动导入系统级提示词
+  根据固定提示词自动生成任务书生成
+  自动进入下一步
+→ Phase 2: 任务书 review
+  双重review
+→ Phase 3: 模块并行开发
+→ Phase 4: 代码 review
+→ Phase 5: 验收

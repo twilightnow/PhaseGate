@@ -38,6 +38,7 @@ If a command is missing, incompatible, or obviously unrelated, say so and use th
 ## Fix Rules
 
 - If you find a small, local issue blocking acceptance, fix it when reasonable and re-run the affected check
+- **Scope constraint**: Fixes must stay within files already created or modified in Phase 3. Do not create new files or introduce changes outside the existing implementation scope.
 - If a problem is broader or risky, report it clearly instead of forcing a speculative fix
 - Do not start a new requirement or redesign the workflow in this phase
 

@@ -39,6 +39,7 @@ Review only modules that are marked `done`. Skip modules marked `failed` or `blo
 - Fix P1/P2 issues when the change is low-risk
 - Re-run relevant tests after fixes
 - Do not review or modify failed/blocked modules unless a clearly related shared file requires it
+- **Scope constraint**: Fixes must stay within files already created or modified by Phase 3. Do not introduce new modules, new files outside the existing change set, or redesign the implementation. If a P0 fix requires broader changes, report it as an escalation instead.
 
 ## Output Format
 

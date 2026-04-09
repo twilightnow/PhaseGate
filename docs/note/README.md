@@ -1,9 +1,9 @@
-# Notes
+# 注记
 
-This folder contains working notes, historical snapshots, and exploratory drafts.
+本文件夹包含工作笔记、历史快照和探索性草稿。
 
-Rules:
+规则：
 
-- Notes are not authoritative runtime documentation.
-- If a note conflicts with `docs/core/` or `docs/guides/`, prefer the core or guide doc.
-- Historical notes may mention removed artifacts such as `progress.md`; those references are preserved as history only.
+- 注记不是权威的运行时文档。
+- 如果某条注记与 `docs/core/` 或 `docs/guides/` 中的内容有冲突，以 core 或 guide 文档为准。
+- 历史注记中可能提及已移除的制品（如 `progress.md`）；这些引用仅作为历史记录保留。

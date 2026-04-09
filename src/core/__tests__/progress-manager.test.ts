@@ -249,3 +249,157 @@ describe('ProgressManager — recordPhaseVerdict / getPhaseState', () => {
     expect(state?.state).toBe('gate_failed');
   });
 });
+
+// ---- getQueuedRequirements ----
+
+describe('ProgressManager.getQueuedRequirements', () => {
+  const manager = new ProgressManager();
+
+  async function makeWorkspace(requirements: object[]): Promise<string> {
+    const cwd = await fse.mkdtemp(path.join(os.tmpdir(), 'phasegate-queue-'));
+    await fse.ensureDir(path.join(cwd, '.phasegate', 'requirements'));
+    await fse.writeJson(
+      path.join(cwd, '.phasegate', 'progress.json'),
+      {
+        projectName: 'test',
+        currentPhase: 0,
+        activeRequirement: null,
+        requirements,
+        design: { modules: [], contracts: [], reviewPassed: false },
+        modules: [],
+        codeReviewPassed: false,
+        blockers: [],
+      },
+      { spaces: 2 }
+    );
+    return cwd;
+  }
+
+  afterEach(async () => {
+    const base = os.tmpdir();
+    const entries = await fse.readdir(base);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith('phasegate-queue-'))
+        .map((entry) => fse.remove(path.join(base, entry)))
+    );
+  });
+
+  it('sorts approved requirements: high before normal before low', async () => {
+    const cwd = await makeWorkspace([
+      { name: 'req-low', file: 'req-low.md', status: 'approved', priority: 'low', approvedAt: '2026-01-01T00:00:00Z' },
+      { name: 'req-high', file: 'req-high.md', status: 'approved', priority: 'high', approvedAt: '2026-01-02T00:00:00Z' },
+      { name: 'req-normal', file: 'req-normal.md', status: 'approved', priority: 'normal', approvedAt: '2026-01-03T00:00:00Z' },
+    ]);
+    const queue = manager.getQueuedRequirements(cwd);
+    expect(queue.map((r) => r.name)).toEqual(['req-high', 'req-normal', 'req-low']);
+  });
+
+  it('sorts same-priority requirements by approvedAt ascending', async () => {
+    const cwd = await makeWorkspace([
+      { name: 'req-b', file: 'req-b.md', status: 'approved', priority: 'normal', approvedAt: '2026-02-01T00:00:00Z' },
+      { name: 'req-a', file: 'req-a.md', status: 'approved', priority: 'normal', approvedAt: '2026-01-01T00:00:00Z' },
+    ]);
+    const queue = manager.getQueuedRequirements(cwd);
+    expect(queue.map((r) => r.name)).toEqual(['req-a', 'req-b']);
+  });
+
+  it('excludes non-approved requirements from queue', async () => {
+    const cwd = await makeWorkspace([
+      { name: 'req-draft', file: 'req-draft.md', status: 'draft', priority: 'high' },
+      { name: 'req-approved', file: 'req-approved.md', status: 'approved', priority: 'normal', approvedAt: '2026-01-01T00:00:00Z' },
+      { name: 'req-selected', file: 'req-selected.md', status: 'selected', priority: 'high' },
+      { name: 'req-impl', file: 'req-impl.md', status: 'implemented', priority: 'high' },
+    ]);
+    const queue = manager.getQueuedRequirements(cwd);
+    expect(queue).toHaveLength(1);
+    expect(queue[0]?.name).toBe('req-approved');
+  });
+});
+
+// ---- syncRequirementsFromWorkspace — priority & approvedAt ----
+
+describe('ProgressManager.syncRequirementsFromWorkspace — priority and approvedAt', () => {
+  const manager = new ProgressManager();
+
+  async function makeWorkspace(progress: object): Promise<string> {
+    const cwd = await fse.mkdtemp(path.join(os.tmpdir(), 'phasegate-sync-prio-'));
+    await fse.ensureDir(path.join(cwd, '.phasegate', 'requirements'));
+    await fse.writeJson(path.join(cwd, '.phasegate', 'progress.json'), progress, { spaces: 2 });
+    return cwd;
+  }
+
+  afterEach(async () => {
+    const base = os.tmpdir();
+    const entries = await fse.readdir(base);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith('phasegate-sync-prio-'))
+        .map((entry) => fse.remove(path.join(base, entry)))
+    );
+  });
+
+  it('reads priority from requirement frontmatter', async () => {
+    const cwd = await makeWorkspace({
+      projectName: 'test',
+      currentPhase: 0,
+      activeRequirement: null,
+      requirements: [],
+      design: { modules: [], contracts: [], reviewPassed: false },
+      modules: [],
+      codeReviewPassed: false,
+      blockers: [],
+    });
+    await fse.writeFile(
+      path.join(cwd, '.phasegate', 'requirements', 'feature-a.md'),
+      '---\npriority: high\n---\n# feature-a\n',
+      'utf-8'
+    );
+    const progress = manager.syncRequirementsFromWorkspace(cwd);
+    expect(progress.requirements[0]?.priority).toBe('high');
+  });
+
+  it('defaults priority to normal when frontmatter is absent', async () => {
+    const cwd = await makeWorkspace({
+      projectName: 'test',
+      currentPhase: 0,
+      activeRequirement: null,
+      requirements: [],
+      design: { modules: [], contracts: [], reviewPassed: false },
+      modules: [],
+      codeReviewPassed: false,
+      blockers: [],
+    });
+    await fse.writeFile(
+      path.join(cwd, '.phasegate', 'requirements', 'feature-b.md'),
+      '# feature-b\nSome description.',
+      'utf-8'
+    );
+    const progress = manager.syncRequirementsFromWorkspace(cwd);
+    expect(progress.requirements[0]?.priority).toBe('normal');
+  });
+
+  it('does not overwrite existing approvedAt on re-sync', async () => {
+    const existingApprovedAt = '2026-01-15T08:00:00Z';
+    const cwd = await makeWorkspace({
+      projectName: 'test',
+      currentPhase: 0,
+      activeRequirement: null,
+      requirements: [
+        { name: 'feature-c', file: 'feature-c.md', status: 'approved', priority: 'normal', approvedAt: existingApprovedAt },
+      ],
+      design: { modules: [], contracts: [], reviewPassed: false },
+      modules: [],
+      codeReviewPassed: false,
+      blockers: [],
+    });
+    await fse.writeFile(
+      path.join(cwd, '.phasegate', 'requirements', 'feature-c.md'),
+      '---\npriority: normal\n---\n# feature-c\n',
+      'utf-8'
+    );
+    const progress = manager.syncRequirementsFromWorkspace(cwd);
+    expect(progress.requirements[0]?.approvedAt).toBe(existingApprovedAt);
+  });
+});
+

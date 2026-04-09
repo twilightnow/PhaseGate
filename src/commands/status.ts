@@ -136,4 +136,15 @@ function renderStatus(progress: ProjectProgress): void {
     `${progress.codeReviewPassed ? chalk.green('OK') : chalk.dim('.')} lightweight final review (Phase 4)`
   );
   console.log('');
+
+  const approvedCount = progress.requirements.filter((r) => r.status === 'approved').length;
+  if (approvedCount > 0) {
+    console.log(
+      `待执行队列：${approvedCount} 条（approved）— 运行 ` +
+        chalk.bold('phasegate loop --dry-run') +
+        ' 查看顺序'
+    );
+  } else {
+    console.log(chalk.dim('待执行队列：0 条（approved）'));
+  }
 }

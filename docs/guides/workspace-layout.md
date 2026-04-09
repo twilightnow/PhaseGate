@@ -1,11 +1,11 @@
-# Workspace Layout
+# 工作区布局
 
 - Type: guide
 - Status: active
 - Reader: both
-- Use when: you need to know what belongs under `.phasegate/`
+- Use when: 需要了解 `.phasegate/` 下内容的归属时
 
-## Layout
+## 布局
 
 ```text
 .phasegate/
@@ -18,28 +18,28 @@
   phasegate.config.json
 ```
 
-## Responsibilities
+## 职责说明
 
 ### `requirements/`
 
-- Backlog of requirement documents.
-- Files can be added or revised during Phase 0 discussion.
-- Not blocked by active execution.
+- 需求文档的待办列表。
+- 文件可以在 Phase 0 讨论期间添加或修改。
+- 不受活跃执行阻塞。
 
 ### `tasks/`
 
-- Active task books for the currently selected requirement.
-- Rebuilt or updated during Phase 1 and reviewed in Phase 2.
+- 当前已选需求的活跃任务书。
+- 在 Phase 1 期间重建或更新，在 Phase 2 中评审。
 
 ### `contracts/`
 
-- Active interface contracts for the currently selected requirement.
-- Finalized in Phase 2.
+- 当前已选需求的活跃接口合约。
+- 在 Phase 2 中完成。
 
 ### `scratchpad/`
 
-- Disposable execution output.
-- Common contents:
+- 可丢弃的执行输出。
+- 常见内容：
   - `coordinator/brief.md`
   - `{module}/report.json`
   - `summaries/phase-3-summary.md`
@@ -48,25 +48,25 @@
 
 ### `archive/`
 
-- Historical execution artifacts worth keeping.
-- Populated during finalize after Phase 5.
-- Not a dumping ground for every temporary file.
+- 值得保留的历史执行制品。
+- 在 Phase 5 完成后的最终化过程中填充。
+- 不是每个临时文件的垃圾箱。
 
 ### `progress.json`
 
-- Only authoritative execution state file.
-- Tracks `activeRequirement`, `currentPhase`, requirement statuses, runtime module statuses, and blockers.
+- 唯一权威的执行状态文件。
+- 跟踪 `activeRequirement`、`currentPhase`、需求状态、运行时模块状态和阻塞项。
 
 ### `phasegate.config.json`
 
-- Local configuration for adapter selection and scope routing.
+- 用于适配器选择和 scope 路由的本地配置。
 
-## Notes
+## 注意事项
 
-- The current implementation does not maintain `.phasegate/progress.md`.
-- Summaries that used to live in a progress log are now kept under `scratchpad/summaries/`.
+- 当前实现不维护 `.phasegate/progress.md`。
+- 原先保存在进度日志中的摘要现在保存在 `scratchpad/summaries/` 下。
 
-## Related
+## 相关
 
 - [progress-model.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/core/progress-model.md)
 - [getting-started.md](C:/WorkSpace/6_Source/2_VScode/99_gitProject/claudeCodeLeak/PhaseGate/docs/guides/getting-started.md)

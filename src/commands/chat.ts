@@ -3,8 +3,7 @@ import chalk from 'chalk';
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import { createRunner, getRunnerAdapterName } from '../core/ai-runner';
-import { ProgressManager } from '../core/progress-manager';
-import { buildLocalLanguageInstruction, checkPhase0Gate, detectLocale } from '../core/phase-gate';
+import { buildLocalLanguageInstruction, detectLocale } from '../core/phase-gate';
 
 const PROMPTS_DIR = path.join(__dirname, '..', '..', 'prompts');
 
@@ -162,40 +161,6 @@ export function createChatCommand(): Command {
         process.exit(1);
       }
 
-      console.log('');
-      console.log(
-        chalk.cyan('->') +
-          ' Phase 0 session ended or was interrupted. Running gate check...'
-      );
-
-      const gate = await checkPhase0Gate(cwd, options.feature);
-
-      if (!gate.passed) {
-        console.error(chalk.red('Phase 0 gate failed:'));
-        for (const issue of gate.issues) {
-          console.error(`  ${chalk.yellow('!')} ${issue}`);
-        }
-        console.log('');
-        console.log(
-          'Requirements files were found, but Phase 0 is still incomplete. Fix the issues above and run ' +
-            chalk.bold('phasegate chat') +
-            ' again.'
-        );
-        process.exit(1);
-      }
-
-      const pm = new ProgressManager();
-      pm.approveRequirementDocs(cwd, options.feature);
-
-      console.log(chalk.green('OK') + ' Gate passed.');
-      console.log(chalk.green('OK') + ' Requirement documents approved and synced.');
-      console.log(
-        'Use ' +
-          chalk.bold('phasegate select <requirement>') +
-          ' or ' +
-          chalk.bold('phasegate run --requirement <requirement>') +
-          ' to start execution.'
-      );
     });
 
   return cmd;
